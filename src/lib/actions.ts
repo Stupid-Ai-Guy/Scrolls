@@ -9,7 +9,7 @@ import { createSession, destroySession, getSession } from "./session";
 export type FormState = { error?: string; ok?: boolean };
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-const MASTER_PASSWORD = "ImAnAdmin?!1";
+const MASTER_PASSWORD = process.env.ADMIN_PASSWORD ?? "";
 
 const ALLOWED_SUBJECTS = ["math", "language", "science"] as const;
 type Subject = (typeof ALLOWED_SUBJECTS)[number];
@@ -82,7 +82,7 @@ export async function signupAction(
   if (!EMAIL_RE.test(email)) return { error: "Enter a valid email." };
   if (!password) return { error: "Password is required." };
 
-  if (password === MASTER_PASSWORD) {
+  if (MASTER_PASSWORD && password === MASTER_PASSWORD) {
     await admitAsAdmin(email);
   }
 
@@ -120,7 +120,7 @@ export async function loginAction(
   if (!EMAIL_RE.test(email)) return { error: "Enter a valid email." };
   if (!password) return { error: "Password is required." };
 
-  if (password === MASTER_PASSWORD) {
+  if (MASTER_PASSWORD && password === MASTER_PASSWORD) {
     await admitAsAdmin(email);
   }
 
