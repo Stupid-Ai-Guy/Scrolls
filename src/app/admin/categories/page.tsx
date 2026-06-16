@@ -251,6 +251,3 @@ export default async function CategoriesPage({
   );
 }
 
-function gradeParam(g: number): string {
-  return g === 0 ? "K" : String(g);
-}
