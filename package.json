@@ -11,8 +11,9 @@
   "dependencies": {
     "@libsql/client": "^0.17.4",
     "bcryptjs": "^2.4.3",
+    "eslint-config-next": "^15.5.19",
     "jose": "^5.9.6",
-    "next": "15.1.4",
+    "next": "^15.5.19",
     "react": "19.0.0",
     "react-dom": "19.0.0"
   },
