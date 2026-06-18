@@ -16,6 +16,7 @@ function makeClient(): Client {
   if (tursoUrl) {
     return createClient({
       url: tursoUrl,
+      intMode: "number",
       ...(tursoToken ? { authToken: tursoToken } : {}),
     });
   }
@@ -23,6 +24,7 @@ function makeClient(): Client {
   if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
   return createClient({
     url: `file:${path.join(dataDir, "app.sqlite")}`,
+    intMode: "number",
   });
 }
 
