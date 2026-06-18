@@ -3,33 +3,35 @@ import { neon } from "@neondatabase/serverless";
 
 type QueryRow = Record<string, unknown>;
 type Args = unknown[];
-type RawSql = (text: string, params?: Args) => Promise<QueryRow[]>;
+type NeonClient = {
+  query: (text: string, params?: Args) => Promise<QueryRow[]>;
+};
 
 declare global {
   // eslint-disable-next-line no-var
-  var __eduSql: RawSql | undefined;
+  var __eduSql: NeonClient | undefined;
   // eslint-disable-next-line no-var
   var __eduDbInit: Promise<void> | undefined;
 }
 
-function makeSql(): RawSql {
+function makeSql(): NeonClient {
   const url = process.env.DATABASE_URL;
   if (!url) {
     throw new Error(
       "DATABASE_URL is not set. Add it via Vercel Storage → Postgres (or set it in .env.local for local dev).",
     );
   }
-  // The two-arg form is runtime-supported but not in v1.1 types.
-  return neon(url) as unknown as RawSql;
+  // The function itself is also a tagged-template; we only use the .query() method.
+  return neon(url) as unknown as NeonClient;
 }
 
 // Lazy: only construct the client when the first query actually runs.
 // This lets `next build` succeed without DATABASE_URL set.
-function sql(text: string, args?: Args): Promise<QueryRow[]> {
+function sql(text: string, args: Args = []): Promise<QueryRow[]> {
   if (!globalThis.__eduSql) {
     globalThis.__eduSql = makeSql();
   }
-  return globalThis.__eduSql(text, args);
+  return globalThis.__eduSql.query(text, args);
 }
 
 async function ensureColumn(
