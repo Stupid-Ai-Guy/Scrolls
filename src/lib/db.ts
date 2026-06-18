@@ -23,8 +23,14 @@ function makeSql(): RawSql {
   return neon(url) as unknown as RawSql;
 }
 
-const sql: RawSql = globalThis.__eduSql ?? makeSql();
-if (!globalThis.__eduSql) globalThis.__eduSql = sql;
+// Lazy: only construct the client when the first query actually runs.
+// This lets `next build` succeed without DATABASE_URL set.
+function sql(text: string, args?: Args): Promise<QueryRow[]> {
+  if (!globalThis.__eduSql) {
+    globalThis.__eduSql = makeSql();
+  }
+  return globalThis.__eduSql(text, args);
+}
 
 async function ensureColumn(
   table: string,
