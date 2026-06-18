@@ -15,14 +15,18 @@ function makeClient(): Client {
   const tursoToken = process.env.TURSO_AUTH_TOKEN;
 
   if (tursoUrl) {
-    // Use the /web HTTP-only variant on serverless to avoid the undici
-    // "expected non-null body source" bug in @libsql/client's Node entry.
+    // /web HTTP variant + a fetch wrapper that opts out of Next.js's
+    // request body caching, which otherwise causes
+    // "expected non-null body source" on Vercel.
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     const { createClient } =
       require("@libsql/client/web") as typeof import("@libsql/client/web");
+    const noCacheFetch: typeof fetch = (input, init) =>
+      fetch(input, { ...init, cache: "no-store" });
     return createClient({
       url: tursoUrl,
       intMode: "number",
+      fetch: noCacheFetch,
       ...(tursoToken ? { authToken: tursoToken } : {}),
     });
   }
