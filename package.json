@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@libsql/client": "^0.17.4",
+    "@neondatabase/serverless": "^1.1.0",
     "bcryptjs": "^2.4.3",
     "eslint-config-next": "^15.5.19",
     "jose": "^5.9.6",

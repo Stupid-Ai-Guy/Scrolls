@@ -1,95 +1,77 @@
 import "server-only";
-import type { Client, InValue } from "@libsql/client/web";
-import path from "node:path";
-import fs from "node:fs";
+import { neon } from "@neondatabase/serverless";
+
+type QueryRow = Record<string, unknown>;
+type Args = unknown[];
+type RawSql = (text: string, params?: Args) => Promise<QueryRow[]>;
 
 declare global {
   // eslint-disable-next-line no-var
-  var __eduDb: Client | undefined;
+  var __eduSql: RawSql | undefined;
   // eslint-disable-next-line no-var
   var __eduDbInit: Promise<void> | undefined;
 }
 
-function makeClient(): Client {
-  const tursoUrl = process.env.TURSO_URL;
-  const tursoToken = process.env.TURSO_AUTH_TOKEN;
-
-  if (tursoUrl) {
-    // /web HTTP variant + a fetch wrapper that opts out of Next.js's
-    // request body caching, which otherwise causes
-    // "expected non-null body source" on Vercel.
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const { createClient } =
-      require("@libsql/client/web") as typeof import("@libsql/client/web");
-    const noCacheFetch: typeof fetch = (input, init) =>
-      fetch(input, { ...init, cache: "no-store" });
-    return createClient({
-      url: tursoUrl,
-      intMode: "number",
-      fetch: noCacheFetch,
-      ...(tursoToken ? { authToken: tursoToken } : {}),
-    });
+function makeSql(): RawSql {
+  const url = process.env.DATABASE_URL;
+  if (!url) {
+    throw new Error(
+      "DATABASE_URL is not set. Add it via Vercel Storage → Postgres (or set it in .env.local for local dev).",
+    );
   }
-
-  // Local dev: the full client supports file:// URLs.
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const { createClient } =
-    require("@libsql/client") as typeof import("@libsql/client");
-  const dataDir = path.join(process.cwd(), "data");
-  if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
-  return createClient({
-    url: `file:${path.join(dataDir, "app.sqlite")}`,
-    intMode: "number",
-  });
+  // The two-arg form is runtime-supported but not in v1.1 types.
+  return neon(url) as unknown as RawSql;
 }
 
-export const db: Client = globalThis.__eduDb ?? makeClient();
-if (!globalThis.__eduDb) globalThis.__eduDb = db;
+const sql: RawSql = globalThis.__eduSql ?? makeSql();
+if (!globalThis.__eduSql) globalThis.__eduSql = sql;
 
 async function ensureColumn(
   table: string,
   column: string,
   definition: string,
 ) {
-  const result = await db.execute(`PRAGMA table_info(${table})`);
-  const has = result.rows.some(
-    (r) => (r as unknown as { name: string }).name === column,
+  const rows = await sql(
+    "SELECT column_name FROM information_schema.columns WHERE table_name = $1 AND column_name = $2",
+    [table, column],
   );
-  if (!has) {
-    await db.execute(
-      `ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`,
-    );
+  if (rows.length === 0) {
+    await sql(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
   }
 }
 
 async function _init(): Promise<void> {
-  await db.executeMultiple(`
+  await sql(`
     CREATE TABLE IF NOT EXISTS users (
-      id            INTEGER PRIMARY KEY AUTOINCREMENT,
+      id            SERIAL PRIMARY KEY,
       email         TEXT NOT NULL UNIQUE,
       password_hash TEXT NOT NULL,
       tier          TEXT NOT NULL DEFAULT 'basic',
       role          TEXT NOT NULL DEFAULT 'user',
-      created_at    INTEGER NOT NULL
-    );
+      created_at    BIGINT NOT NULL
+    )
+  `);
+  await sql(`
     CREATE TABLE IF NOT EXISTS lessons (
-      id          INTEGER PRIMARY KEY AUTOINCREMENT,
+      id          SERIAL PRIMARY KEY,
       title       TEXT NOT NULL,
       description TEXT NOT NULL DEFAULT '',
       content     TEXT NOT NULL DEFAULT '',
       grade       INTEGER NOT NULL DEFAULT 1,
       subject     TEXT NOT NULL DEFAULT 'math',
       created_by  INTEGER NOT NULL,
-      created_at  INTEGER NOT NULL
-    );
+      created_at  BIGINT NOT NULL
+    )
+  `);
+  await sql(`
     CREATE TABLE IF NOT EXISTS categories (
-      id          INTEGER PRIMARY KEY AUTOINCREMENT,
+      id          SERIAL PRIMARY KEY,
       subject     TEXT NOT NULL,
       grade       INTEGER NOT NULL,
       name        TEXT NOT NULL,
       position    INTEGER NOT NULL DEFAULT 0,
-      created_at  INTEGER NOT NULL
-    );
+      created_at  BIGINT NOT NULL
+    )
   `);
   await ensureColumn("users", "role", "TEXT NOT NULL DEFAULT 'user'");
   await ensureColumn("lessons", "category_id", "INTEGER");
@@ -102,40 +84,46 @@ function init(): Promise<void> {
   return globalThis.__eduDbInit;
 }
 
-type Args = InValue[];
-
-function num(v: unknown): number {
-  if (typeof v === "bigint") return Number(v);
-  if (typeof v === "number") return v;
-  return Number(v);
+function normalizeRow(row: QueryRow): QueryRow {
+  const out: QueryRow = {};
+  for (const [k, v] of Object.entries(row)) {
+    if (typeof v === "string" && /^\d+$/.test(v)) {
+      const n = Number(v);
+      out[k] = Number.isSafeInteger(n) ? n : v;
+    } else if (typeof v === "bigint") {
+      out[k] = Number(v);
+    } else {
+      out[k] = v;
+    }
+  }
+  return out;
 }
 
 export async function dbGet<T>(
-  sql: string,
+  sqlText: string,
   args: Args = [],
 ): Promise<T | undefined> {
   await init();
-  const result = await db.execute({ sql, args });
-  return result.rows[0] as T | undefined;
+  const rows = await sql(sqlText, args);
+  if (rows.length === 0) return undefined;
+  return normalizeRow(rows[0]) as T;
 }
 
-export async function dbAll<T>(sql: string, args: Args = []): Promise<T[]> {
-  await init();
-  const result = await db.execute({ sql, args });
-  return result.rows as unknown as T[];
-}
-
-export async function dbRun(
-  sql: string,
+export async function dbAll<T>(
+  sqlText: string,
   args: Args = [],
-): Promise<{ lastInsertRowid: number; rowsAffected: number }> {
+): Promise<T[]> {
   await init();
-  const result = await db.execute({ sql, args });
-  return {
-    lastInsertRowid:
-      result.lastInsertRowid !== undefined ? num(result.lastInsertRowid) : 0,
-    rowsAffected: result.rowsAffected,
-  };
+  const rows = await sql(sqlText, args);
+  return rows.map(normalizeRow) as T[];
+}
+
+export async function dbExec(
+  sqlText: string,
+  args: Args = [],
+): Promise<void> {
+  await init();
+  await sql(sqlText, args);
 }
 
 export type UserRow = {

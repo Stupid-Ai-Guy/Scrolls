@@ -18,7 +18,7 @@ export default async function LessonEditorPage({
   if (!Number.isInteger(lessonId) || lessonId <= 0) notFound();
 
   const lesson = await dbGet<LessonRow>(
-    "SELECT id, title, description, content, grade, subject, category_id, created_by, created_at FROM lessons WHERE id = ?",
+    "SELECT id, title, description, content, grade, subject, category_id, created_by, created_at FROM lessons WHERE id = $1",
     [lessonId],
   );
 

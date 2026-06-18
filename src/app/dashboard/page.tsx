@@ -79,12 +79,12 @@ export default async function DashboardPage({
   const grade = parseGrade(params.grade);
 
   const lessons = await dbAll<LessonCard>(
-    "SELECT id, title, description, category_id FROM lessons WHERE grade = ? AND subject = ? ORDER BY created_at ASC",
+    "SELECT id, title, description, category_id FROM lessons WHERE grade = $1 AND subject = $2 ORDER BY created_at ASC",
     [grade, subject.id],
   );
 
   const categoryRows = await dbAll<CategoryRow>(
-    "SELECT id, subject, grade, name, position, created_at FROM categories WHERE subject = ? AND grade = ? ORDER BY position ASC",
+    "SELECT id, subject, grade, name, position, created_at FROM categories WHERE subject = $1 AND grade = $2 ORDER BY position ASC",
     [subject.id, grade],
   );
 

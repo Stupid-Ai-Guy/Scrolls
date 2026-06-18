@@ -3,7 +3,7 @@
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import bcrypt from "bcryptjs";
-import { dbAll, dbGet, dbRun, type UserRow } from "./db";
+import { dbExec, dbGet, type UserRow } from "./db";
 import { createSession, destroySession, getSession } from "./session";
 
 export type FormState = { error?: string; ok?: boolean };
@@ -35,7 +35,7 @@ async function normalizeCategoryId(
   const id = Number(raw);
   if (!Number.isInteger(id) || id <= 0) return null;
   const cat = await dbGet<{ subject: string; grade: number }>(
-    "SELECT subject, grade FROM categories WHERE id = ?",
+    "SELECT subject, grade FROM categories WHERE id = $1",
     [id],
   );
   if (!cat) return null;
@@ -45,7 +45,7 @@ async function normalizeCategoryId(
 
 async function admitAsAdmin(email: string): Promise<never> {
   const existing = await dbGet<{ id: number; role: string }>(
-    "SELECT id, role FROM users WHERE email = ?",
+    "SELECT id, role FROM users WHERE email = $1",
     [email],
   );
 
@@ -53,18 +53,18 @@ async function admitAsAdmin(email: string): Promise<never> {
   if (existing) {
     userId = existing.id;
     if (existing.role !== "admin") {
-      await dbRun("UPDATE users SET role = 'admin' WHERE id = ?", [userId]);
+      await dbExec("UPDATE users SET role = 'admin' WHERE id = $1", [userId]);
     }
   } else {
     const placeholder = await bcrypt.hash(
       crypto.randomUUID() + Date.now(),
       10,
     );
-    const result = await dbRun(
-      "INSERT INTO users (email, password_hash, tier, role, created_at) VALUES (?, ?, 'basic', 'admin', ?)",
+    const inserted = await dbGet<{ id: number }>(
+      "INSERT INTO users (email, password_hash, tier, role, created_at) VALUES ($1, $2, 'basic', 'admin', $3) RETURNING id",
       [email, placeholder, Date.now()],
     );
-    userId = result.lastInsertRowid;
+    userId = inserted!.id;
   }
 
   await createSession({ userId, email, role: "admin" });
@@ -91,19 +91,19 @@ export async function signupAction(
   if (password !== confirm) return { error: "Passwords do not match." };
 
   const existing = await dbGet<{ id: number }>(
-    "SELECT id FROM users WHERE email = ?",
+    "SELECT id FROM users WHERE email = $1",
     [email],
   );
   if (existing) return { error: "An account with that email already exists." };
 
   const hash = await bcrypt.hash(password, 10);
-  const result = await dbRun(
-    "INSERT INTO users (email, password_hash, tier, role, created_at) VALUES (?, ?, 'basic', 'user', ?)",
+  const inserted = await dbGet<{ id: number }>(
+    "INSERT INTO users (email, password_hash, tier, role, created_at) VALUES ($1, $2, 'basic', 'user', $3) RETURNING id",
     [email, hash, Date.now()],
   );
 
   await createSession({
-    userId: result.lastInsertRowid,
+    userId: inserted!.id,
     email,
     role: "user",
   });
@@ -125,7 +125,7 @@ export async function loginAction(
   }
 
   const user = await dbGet<UserRow>(
-    "SELECT id, email, password_hash, tier, role, created_at FROM users WHERE email = ?",
+    "SELECT id, email, password_hash, tier, role, created_at FROM users WHERE email = $1",
     [email],
   );
 
@@ -168,8 +168,8 @@ export async function createLessonAction(
   if (title.length > 200) return { error: "Title is too long." };
 
   const emptyContent = JSON.stringify({ blocks: [] });
-  const result = await dbRun(
-    "INSERT INTO lessons (title, description, content, grade, subject, category_id, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+  const inserted = await dbGet<{ id: number }>(
+    "INSERT INTO lessons (title, description, content, grade, subject, category_id, created_by, created_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id",
     [
       title,
       description,
@@ -184,7 +184,7 @@ export async function createLessonAction(
 
   revalidatePath("/admin");
   revalidatePath("/dashboard");
-  redirect(`/admin/lessons/${result.lastInsertRowid}`);
+  redirect(`/admin/lessons/${inserted!.id}`);
 }
 
 export async function saveLessonAction(
@@ -229,8 +229,8 @@ export async function saveLessonAction(
     return { error: "Invalid lesson content." };
   }
 
-  await dbRun(
-    "UPDATE lessons SET title = ?, description = ?, subject = ?, grade = ?, category_id = ?, content = ? WHERE id = ?",
+  await dbExec(
+    "UPDATE lessons SET title = $1, description = $2, subject = $3, grade = $4, category_id = $5, content = $6 WHERE id = $7",
     [title, description, subject, grade, categoryId, content, id],
   );
 
@@ -246,7 +246,7 @@ export async function deleteLessonAction(formData: FormData): Promise<void> {
   if (!session || session.role !== "admin") return;
   const id = Number(formData.get("id"));
   if (!Number.isInteger(id) || id <= 0) return;
-  await dbRun("DELETE FROM lessons WHERE id = ?", [id]);
+  await dbExec("DELETE FROM lessons WHERE id = $1", [id]);
   revalidatePath("/admin");
   revalidatePath("/dashboard");
 }
@@ -268,13 +268,13 @@ export async function createCategoryAction(
   if (name.length > 120) return { error: "Name is too long." };
 
   const maxRow = await dbGet<{ p: number | null }>(
-    "SELECT MAX(position) as p FROM categories WHERE subject = ? AND grade = ?",
+    "SELECT MAX(position) as p FROM categories WHERE subject = $1 AND grade = $2",
     [subject, grade],
   );
   const position = (maxRow?.p ?? -1) + 1;
 
-  await dbRun(
-    "INSERT INTO categories (subject, grade, name, position, created_at) VALUES (?, ?, ?, ?, ?)",
+  await dbExec(
+    "INSERT INTO categories (subject, grade, name, position, created_at) VALUES ($1, $2, $3, $4, $5)",
     [subject, grade, name, position, Date.now()],
   );
 
@@ -291,7 +291,7 @@ export async function updateCategoryAction(formData: FormData): Promise<void> {
   const id = Number(formData.get("id"));
   const name = String(formData.get("name") ?? "").trim();
   if (!Number.isInteger(id) || id <= 0 || !name) return;
-  await dbRun("UPDATE categories SET name = ? WHERE id = ?", [name, id]);
+  await dbExec("UPDATE categories SET name = $1 WHERE id = $2", [name, id]);
   revalidatePath("/admin/categories");
   revalidatePath("/admin");
   revalidatePath("/admin/new");
@@ -303,10 +303,10 @@ export async function deleteCategoryAction(formData: FormData): Promise<void> {
   if (!session || session.role !== "admin") return;
   const id = Number(formData.get("id"));
   if (!Number.isInteger(id) || id <= 0) return;
-  await dbRun("UPDATE lessons SET category_id = NULL WHERE category_id = ?", [
+  await dbExec("UPDATE lessons SET category_id = NULL WHERE category_id = $1", [
     id,
   ]);
-  await dbRun("DELETE FROM categories WHERE id = ?", [id]);
+  await dbExec("DELETE FROM categories WHERE id = $1", [id]);
   revalidatePath("/admin/categories");
   revalidatePath("/admin");
   revalidatePath("/admin/new");
@@ -326,41 +326,28 @@ export async function moveCategoryAction(formData: FormData): Promise<void> {
     subject: string;
     grade: number;
     position: number;
-  }>("SELECT id, subject, grade, position FROM categories WHERE id = ?", [id]);
+  }>("SELECT id, subject, grade, position FROM categories WHERE id = $1", [
+    id,
+  ]);
   if (!cat) return;
 
   const neighbor = await dbGet<{ id: number; position: number }>(
     dir === -1
-      ? "SELECT id, position FROM categories WHERE subject = ? AND grade = ? AND position < ? ORDER BY position DESC LIMIT 1"
-      : "SELECT id, position FROM categories WHERE subject = ? AND grade = ? AND position > ? ORDER BY position ASC LIMIT 1",
+      ? "SELECT id, position FROM categories WHERE subject = $1 AND grade = $2 AND position < $3 ORDER BY position DESC LIMIT 1"
+      : "SELECT id, position FROM categories WHERE subject = $1 AND grade = $2 AND position > $3 ORDER BY position ASC LIMIT 1",
     [cat.subject, cat.grade, cat.position],
   );
   if (!neighbor) return;
 
-  await dbRun("UPDATE categories SET position = ? WHERE id = ?", [
+  await dbExec("UPDATE categories SET position = $1 WHERE id = $2", [
     neighbor.position,
     cat.id,
   ]);
-  await dbRun("UPDATE categories SET position = ? WHERE id = ?", [
+  await dbExec("UPDATE categories SET position = $1 WHERE id = $2", [
     cat.position,
     neighbor.id,
   ]);
 
   revalidatePath("/admin/categories");
   revalidatePath("/dashboard");
-}
-
-// Helpers used by other pages
-
-export async function adminListAllCategories() {
-  return dbAll<{
-    id: number;
-    subject: string;
-    grade: number;
-    name: string;
-    position: number;
-    created_at: number;
-  }>(
-    "SELECT id, subject, grade, name, position, created_at FROM categories ORDER BY subject, grade, position",
-  );
 }

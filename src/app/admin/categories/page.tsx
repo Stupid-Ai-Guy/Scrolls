@@ -33,12 +33,12 @@ export default async function CategoriesPage({
   const grade = parseGrade(params.grade);
 
   const categories = await dbAll<CategoryRow>(
-    "SELECT id, subject, grade, name, position, created_at FROM categories WHERE subject = ? AND grade = ? ORDER BY position ASC",
+    "SELECT id, subject, grade, name, position, created_at FROM categories WHERE subject = $1 AND grade = $2 ORDER BY position ASC",
     [subjectId, grade],
   );
 
   const countsRaw = await dbAll<{ category_id: number | null; c: number }>(
-    "SELECT category_id, COUNT(*) as c FROM lessons WHERE subject = ? AND grade = ? GROUP BY category_id",
+    "SELECT category_id, COUNT(*)::int as c FROM lessons WHERE subject = $1 AND grade = $2 GROUP BY category_id",
     [subjectId, grade],
   );
   const counts = new Map<number, number>();
