@@ -1,5 +1,5 @@
 import "server-only";
-import { createClient, type Client, type InValue } from "@libsql/client";
+import type { Client, InValue } from "@libsql/client/web";
 import path from "node:path";
 import fs from "node:fs";
 
@@ -13,13 +13,24 @@ declare global {
 function makeClient(): Client {
   const tursoUrl = process.env.TURSO_URL;
   const tursoToken = process.env.TURSO_AUTH_TOKEN;
+
   if (tursoUrl) {
+    // Use the /web HTTP-only variant on serverless to avoid the undici
+    // "expected non-null body source" bug in @libsql/client's Node entry.
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { createClient } =
+      require("@libsql/client/web") as typeof import("@libsql/client/web");
     return createClient({
       url: tursoUrl,
       intMode: "number",
       ...(tursoToken ? { authToken: tursoToken } : {}),
     });
   }
+
+  // Local dev: the full client supports file:// URLs.
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { createClient } =
+    require("@libsql/client") as typeof import("@libsql/client");
   const dataDir = path.join(process.cwd(), "data");
   if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
   return createClient({
