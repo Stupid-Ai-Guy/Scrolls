@@ -249,6 +249,59 @@ function SceneCanvas({
   const svgRef = useRef<SVGSVGElement>(null);
   const dragRef = useRef<DragState | null>(null);
   const movedRef = useRef(false);
+  const [view, setView] = useState({ zoom: 1, panX: 0, panY: 0 });
+
+  const editable = !!onUpdateShape;
+
+  // Non-passive wheel listener so we can preventDefault and intercept the page
+  // scroll. Only attached in editor mode.
+  useEffect(() => {
+    const svg = svgRef.current;
+    if (!svg || !editable) return;
+
+    function onWheel(e: WheelEvent) {
+      e.preventDefault();
+      const target = e.currentTarget as SVGSVGElement;
+      const rect = target.getBoundingClientRect();
+      const fx = (e.clientX - rect.left) / rect.width;
+      const fy = (e.clientY - rect.top) / rect.height;
+
+      if (e.ctrlKey || e.metaKey) {
+        // Zoom (ctrl/cmd + wheel, or trackpad pinch)
+        const factor = e.deltaY > 0 ? 1 / 1.15 : 1.15;
+        setView((v) => {
+          const newZ = Math.max(0.3, Math.min(5, v.zoom * factor));
+          if (newZ === v.zoom) return v;
+          const vbW = W / v.zoom;
+          const vbH = H / v.zoom;
+          // World SVG coord under cursor with old viewBox
+          const cx = v.panX + fx * vbW;
+          const cy = v.panY + fy * vbH;
+          const newVbW = W / newZ;
+          const newVbH = H / newZ;
+          return {
+            zoom: newZ,
+            panX: cx - fx * newVbW,
+            panY: cy - fy * newVbH,
+          };
+        });
+      } else {
+        // Pan: vertical scroll → vertical pan, horizontal scroll → horizontal pan
+        setView((v) => {
+          const vbW = W / v.zoom;
+          const vbH = H / v.zoom;
+          return {
+            ...v,
+            panX: v.panX + (e.deltaX / rect.width) * vbW,
+            panY: v.panY + (e.deltaY / rect.height) * vbH,
+          };
+        });
+      }
+    }
+
+    svg.addEventListener("wheel", onWheel, { passive: false });
+    return () => svg.removeEventListener("wheel", onWheel);
+  }, [editable]);
 
   const { xmin, xmax, ymin, ymax } = scene.view;
   const dx = xmax - xmin;
@@ -256,15 +309,24 @@ function SceneCanvas({
   const toX = (wx: number) => ((wx - xmin) / dx) * W;
   const toY = (wy: number) => ((ymax - wy) / dy) * H;
 
+  const vbW = W / view.zoom;
+  const vbH = H / view.zoom;
+
   function svgToWorld(clientX: number, clientY: number): [number, number] {
     const svg = svgRef.current;
     if (!svg) return [0, 0];
     const rect = svg.getBoundingClientRect();
-    const sx = ((clientX - rect.left) / rect.width) * W;
-    const sy = ((clientY - rect.top) / rect.height) * H;
+    const fx = (clientX - rect.left) / rect.width;
+    const fy = (clientY - rect.top) / rect.height;
+    const sx = view.panX + fx * vbW;
+    const sy = view.panY + fy * vbH;
     const wx = (sx / W) * dx + xmin;
     const wy = ymax - (sy / H) * dy;
     return [wx, wy];
+  }
+
+  function resetView() {
+    setView({ zoom: 1, panX: 0, panY: 0 });
   }
 
   function beginMove(e: React.MouseEvent, shape: SceneShape) {
@@ -335,11 +397,23 @@ function SceneCanvas({
 
   const placementMode = activeTool !== "select";
 
+  const viewIsDefault = view.zoom === 1 && view.panX === 0 && view.panY === 0;
+
   return (
     <div className="relative h-full overflow-hidden rounded-2xl bg-zinc-925 ring-1 ring-zinc-800">
+      {editable && !viewIsDefault && (
+        <button
+          type="button"
+          onClick={resetView}
+          className="absolute right-3 top-3 z-10 rounded-md bg-zinc-900/90 px-2 py-1 text-[10px] font-medium text-zinc-300 ring-1 ring-zinc-800 backdrop-blur hover:bg-zinc-800"
+          title="Reset zoom and pan"
+        >
+          {Math.round(view.zoom * 100)}% · Reset
+        </button>
+      )}
       <svg
         ref={svgRef}
-        viewBox={`0 0 ${W} ${H}`}
+        viewBox={`${view.panX} ${view.panY} ${vbW} ${vbH}`}
         className="block h-auto w-full"
         preserveAspectRatio="xMidYMid meet"
         onMouseMove={handleMouseMove}
@@ -1237,24 +1311,51 @@ function ColorBar({
   color: string;
   onChange: (c: string) => void;
 }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    function onDocClick(e: MouseEvent) {
+      if (!ref.current?.contains(e.target as Node)) setOpen(false);
+    }
+    document.addEventListener("mousedown", onDocClick);
+    return () => document.removeEventListener("mousedown", onDocClick);
+  }, [open]);
+
   return (
-    <div className="flex items-center gap-1">
-      {COLOR_NAMES.map((c) => (
-        <button
-          key={c}
-          type="button"
-          onClick={() => onChange(c)}
-          title={c}
-          aria-label={c}
-          className={
-            "h-5 w-5 rounded-full ring-1 transition " +
-            (color === c
-              ? "ring-2 ring-cyan-400"
-              : "ring-zinc-700 hover:ring-zinc-500")
-          }
-          style={{ backgroundColor: COLORS[c] }}
-        />
-      ))}
+    <div ref={ref} className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        title="Color"
+        aria-label="Color"
+        className="flex h-7 w-7 items-center justify-center rounded-full ring-2 ring-zinc-700 transition hover:ring-zinc-500"
+        style={{ backgroundColor: COLORS[color] ?? color }}
+      />
+      {open && (
+        <div className="absolute left-0 top-full z-30 mt-2 grid grid-cols-6 gap-1 rounded-xl bg-zinc-900 p-2 shadow-2xl ring-1 ring-zinc-800">
+          {COLOR_NAMES.map((c) => (
+            <button
+              key={c}
+              type="button"
+              onClick={() => {
+                onChange(c);
+                setOpen(false);
+              }}
+              title={c}
+              aria-label={c}
+              className={
+                "h-6 w-6 rounded-full ring-1 transition " +
+                (color === c
+                  ? "ring-2 ring-cyan-400"
+                  : "ring-zinc-700 hover:ring-zinc-500")
+              }
+              style={{ backgroundColor: COLORS[c] }}
+            />
+          ))}
+        </div>
+      )}
     </div>
   );
 }
