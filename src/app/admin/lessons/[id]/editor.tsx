@@ -15,6 +15,12 @@ import {
 import { SAMPLE_SCROLLSCRIPT } from "@/lib/scrollscript";
 import ScrollScriptRunner from "@/components/scrollscript-runner";
 import ScrollScriptEditor from "@/components/scrollscript-editor";
+import {
+  DEFAULT_SCENE,
+  SceneEditor as VisualSceneEditor,
+  SceneRunner,
+} from "@/components/scene-editor";
+import type { Scene } from "@/lib/lesson-content";
 
 type SubjectId = "math" | "language" | "science";
 type EditorBlock = Block & { _key: string };
@@ -715,6 +721,12 @@ function InteractiveEditor({
   onUpdate: (patch: Partial<InteractiveBlock>) => void;
 }) {
   const [showHelp, setShowHelp] = useState(false);
+  // Default new blocks to Visual mode. Existing blocks with code-only stay in Code.
+  const [mode, setMode] = useState<"visual" | "code">(() =>
+    block.scene ? "visual" : block.code ? "code" : "visual",
+  );
+
+  const scene: Scene = block.scene ?? DEFAULT_SCENE;
 
   return (
     <div className="space-y-4">
@@ -750,38 +762,74 @@ function InteractiveEditor({
         )}
       </div>
 
-      <div>
-        <div className="mb-2 flex items-center justify-between">
-          <p className="text-xs font-medium uppercase tracking-wider text-zinc-500">
-            ScrollScript code
-          </p>
+      <div className="inline-flex items-center gap-1 rounded-full bg-zinc-900 p-1 ring-1 ring-zinc-800">
+        {(["visual", "code"] as const).map((m) => (
           <button
+            key={m}
             type="button"
-            onClick={() => setShowHelp((v) => !v)}
-            className="text-xs font-medium text-cyan-300 hover:text-cyan-200"
+            onClick={() => setMode(m)}
+            className={
+              "rounded-full px-3 py-1 text-xs font-medium transition " +
+              (mode === m
+                ? "bg-zinc-800 text-zinc-100"
+                : "text-zinc-500 hover:text-zinc-200")
+            }
           >
-            {showHelp ? "Hide syntax" : "Show syntax"}
+            {m === "visual" ? "Visual" : "Code"}
           </button>
-        </div>
-        {showHelp && <SyntaxHelp />}
-        <div className="mt-2">
-          <ScrollScriptEditor
-            value={block.code}
-            onChange={(v) => onUpdate({ code: v })}
-            minRows={12}
-            label="interactive.script"
-          />
-        </div>
+        ))}
       </div>
 
-      <div>
-        <p className="mb-2 text-xs font-medium uppercase tracking-wider text-zinc-500">
-          Live preview
-        </p>
-        <div className="rounded-xl bg-zinc-900 p-4 ring-1 ring-zinc-800">
-          <ScrollScriptRunner code={block.code} />
-        </div>
-      </div>
+      {mode === "visual" ? (
+        <>
+          <VisualSceneEditor
+            scene={scene}
+            onChange={(next) => onUpdate({ scene: next })}
+          />
+          <div>
+            <p className="mb-2 text-xs font-medium uppercase tracking-wider text-zinc-500">
+              Live preview
+            </p>
+            <div className="rounded-xl bg-zinc-900 p-4 ring-1 ring-zinc-800">
+              <SceneRunner scene={scene} />
+            </div>
+          </div>
+        </>
+      ) : (
+        <>
+          <div>
+            <div className="mb-2 flex items-center justify-between">
+              <p className="text-xs font-medium uppercase tracking-wider text-zinc-500">
+                ScrollScript code (advanced — for sliders, conditionals, etc.)
+              </p>
+              <button
+                type="button"
+                onClick={() => setShowHelp((v) => !v)}
+                className="text-xs font-medium text-cyan-300 hover:text-cyan-200"
+              >
+                {showHelp ? "Hide syntax" : "Show syntax"}
+              </button>
+            </div>
+            {showHelp && <SyntaxHelp />}
+            <div className="mt-2">
+              <ScrollScriptEditor
+                value={block.code}
+                onChange={(v) => onUpdate({ code: v })}
+                minRows={12}
+                label="interactive.script"
+              />
+            </div>
+          </div>
+          <div>
+            <p className="mb-2 text-xs font-medium uppercase tracking-wider text-zinc-500">
+              Live preview
+            </p>
+            <div className="rounded-xl bg-zinc-900 p-4 ring-1 ring-zinc-800">
+              <ScrollScriptRunner code={block.code} />
+            </div>
+          </div>
+        </>
+      )}
     </div>
   );
 }

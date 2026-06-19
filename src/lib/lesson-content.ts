@@ -19,10 +19,75 @@ export type QuestionBlock = {
   imageUrl?: string;
 };
 
+export type SceneShape =
+  | {
+      id: string;
+      kind: "point";
+      x: number;
+      y: number;
+      color: string;
+      label?: string;
+    }
+  | {
+      id: string;
+      kind: "line";
+      x1: number;
+      y1: number;
+      x2: number;
+      y2: number;
+      color: string;
+    }
+  | {
+      id: string;
+      kind: "circle";
+      cx: number;
+      cy: number;
+      r: number;
+      color: string;
+      label?: string;
+    }
+  | {
+      id: string;
+      kind: "rect";
+      cx: number;
+      cy: number;
+      w: number;
+      h: number;
+      color: string;
+      label?: string;
+    }
+  | {
+      id: string;
+      kind: "text";
+      x: number;
+      y: number;
+      text: string;
+      color: string;
+    }
+  | {
+      id: string;
+      kind: "button";
+      cx: number;
+      cy: number;
+      w: number;
+      h: number;
+      label: string;
+      buttonId: string;
+      color: string;
+    };
+
+export type Scene = {
+  view: { xmin: number; xmax: number; ymin: number; ymax: number };
+  shapes: SceneShape[];
+  correctButtonId?: string;
+  hint?: string;
+};
+
 export type InteractiveBlock = {
   type: "interactive";
   prompt?: string;
   code: string;
+  scene?: Scene;
   imageUrl?: string;
 };
 

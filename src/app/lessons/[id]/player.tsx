@@ -10,6 +10,7 @@ import type {
   TextBlock,
 } from "@/lib/lesson-content";
 import ScrollScriptRunner from "@/components/scrollscript-runner";
+import { SceneRunner } from "@/components/scene-editor";
 import {
   gradeLongLabel,
   gradeParam,
@@ -521,7 +522,11 @@ function InteractiveView({
         </div>
       )}
       <div className="mt-6">
-        <ScrollScriptRunner code={block.code} onCheckResult={onResult} />
+        {block.scene ? (
+          <SceneRunner scene={block.scene} onCheckResult={onResult} />
+        ) : (
+          <ScrollScriptRunner code={block.code} onCheckResult={onResult} />
+        )}
       </div>
     </div>
   );
