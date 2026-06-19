@@ -18,8 +18,8 @@ const COLORS: Record<string, string> = {
 };
 const COLOR_NAMES = Object.keys(COLORS);
 
-const W = 480;
-const H = 360;
+const W = 640;
+const H = 420;
 
 export const DEFAULT_SCENE: Scene = {
   view: { xmin: -8, xmax: 8, ymin: -6, ymax: 6 },
@@ -28,6 +28,10 @@ export const DEFAULT_SCENE: Scene = {
 
 function uid() {
   return crypto.randomUUID().slice(0, 8);
+}
+
+function round(n: number): number {
+  return Math.round(n * 10) / 10;
 }
 
 function defaultShape(kind: SceneShape["kind"]): SceneShape {
@@ -75,14 +79,104 @@ function defaultShape(kind: SceneShape["kind"]): SceneShape {
   }
 }
 
-// ---------------- Renderer (shared by editor + player) ----------------
+// ---------------- Icons ----------------
+
+const ICONS: Record<SceneShape["kind"], React.ReactNode> = {
+  point: (
+    <svg viewBox="0 0 16 16" className="h-4 w-4" fill="currentColor">
+      <circle cx="8" cy="8" r="3" />
+    </svg>
+  ),
+  line: (
+    <svg
+      viewBox="0 0 16 16"
+      className="h-4 w-4"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+    >
+      <line x1="3" y1="13" x2="13" y2="3" />
+    </svg>
+  ),
+  circle: (
+    <svg
+      viewBox="0 0 16 16"
+      className="h-4 w-4"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+    >
+      <circle cx="8" cy="8" r="5" />
+    </svg>
+  ),
+  rect: (
+    <svg
+      viewBox="0 0 16 16"
+      className="h-4 w-4"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+    >
+      <rect x="3" y="4" width="10" height="8" rx="1" />
+    </svg>
+  ),
+  text: (
+    <svg viewBox="0 0 16 16" className="h-4 w-4" fill="currentColor">
+      <text
+        x="8"
+        y="13"
+        textAnchor="middle"
+        fontSize="13"
+        fontWeight="700"
+        fontFamily="ui-sans-serif, system-ui"
+      >
+        T
+      </text>
+    </svg>
+  ),
+  button: (
+    <svg
+      viewBox="0 0 16 16"
+      className="h-4 w-4"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+    >
+      <rect x="2" y="3" width="12" height="7" rx="2" />
+      <circle cx="8" cy="13" r="1.5" fill="currentColor" stroke="none" />
+    </svg>
+  ),
+};
+
+// ---------------- Renderer ----------------
+
+type ResizeHandle =
+  | "tl"
+  | "tr"
+  | "bl"
+  | "br"
+  | "end1"
+  | "end2"
+  | "radius";
+
+type DragState =
+  | { type: "move"; shapeId: string; original: SceneShape; startWX: number; startWY: number }
+  | {
+      type: "resize";
+      shapeId: string;
+      original: SceneShape;
+      handle: ResizeHandle;
+      startWX: number;
+      startWY: number;
+    };
 
 type RendererProps = {
   scene: Scene;
   selectedId?: string;
   clickedButtonId?: string;
   onSelect?: (id: string | null) => void;
-  onMove?: (id: string, dx: number, dy: number) => void;
+  onUpdateShape?: (id: string, patch: Partial<SceneShape>) => void;
   onClickButton?: (buttonId: string) => void;
 };
 
@@ -91,15 +185,12 @@ function SceneCanvas({
   selectedId,
   clickedButtonId,
   onSelect,
-  onMove,
+  onUpdateShape,
   onClickButton,
 }: RendererProps) {
   const svgRef = useRef<SVGSVGElement>(null);
-  const dragRef = useRef<{
-    id: string;
-    startX: number;
-    startY: number;
-  } | null>(null);
+  const dragRef = useRef<DragState | null>(null);
+  const movedRef = useRef(false);
 
   const { xmin, xmax, ymin, ymax } = scene.view;
   const dx = xmax - xmin;
@@ -120,34 +211,68 @@ function SceneCanvas({
     return [wx, wy];
   }
 
-  function handleShapeMouseDown(
-    e: React.MouseEvent<SVGGElement>,
-    id: string,
-  ) {
-    if (!onMove) return;
+  function beginMove(e: React.MouseEvent, shape: SceneShape) {
+    if (!onUpdateShape) return;
     e.stopPropagation();
-    onSelect?.(id);
+    onSelect?.(shape.id);
     const [wx, wy] = svgToWorld(e.clientX, e.clientY);
-    dragRef.current = { id, startX: wx, startY: wy };
+    dragRef.current = {
+      type: "move",
+      shapeId: shape.id,
+      original: shape,
+      startWX: wx,
+      startWY: wy,
+    };
+    movedRef.current = false;
   }
 
-  function handleSvgMouseMove(e: React.MouseEvent<SVGSVGElement>) {
-    if (!dragRef.current || !onMove) return;
+  function beginResize(
+    e: React.MouseEvent,
+    shape: SceneShape,
+    handle: ResizeHandle,
+  ) {
+    if (!onUpdateShape) return;
+    e.stopPropagation();
     const [wx, wy] = svgToWorld(e.clientX, e.clientY);
-    const dxw = wx - dragRef.current.startX;
-    const dyw = wy - dragRef.current.startY;
-    if (Math.abs(dxw) < 0.01 && Math.abs(dyw) < 0.01) return;
-    onMove(dragRef.current.id, dxw, dyw);
-    dragRef.current.startX = wx;
-    dragRef.current.startY = wy;
+    dragRef.current = {
+      type: "resize",
+      shapeId: shape.id,
+      original: shape,
+      handle,
+      startWX: wx,
+      startWY: wy,
+    };
+    movedRef.current = false;
   }
 
-  function handleSvgMouseUp() {
+  function handleMouseMove(e: React.MouseEvent<SVGSVGElement>) {
+    const d = dragRef.current;
+    if (!d || !onUpdateShape) return;
+    const [wx, wy] = svgToWorld(e.clientX, e.clientY);
+
+    if (d.type === "move") {
+      const dxw = wx - d.startWX;
+      const dyw = wy - d.startWY;
+      if (Math.abs(dxw) < 0.01 && Math.abs(dyw) < 0.01) return;
+      movedRef.current = true;
+      const patch = movePatch(d.original, dxw, dyw);
+      onUpdateShape(d.shapeId, patch);
+    } else {
+      movedRef.current = true;
+      const patch = resizePatch(d.original, d.handle, wx, wy);
+      if (patch) onUpdateShape(d.shapeId, patch);
+    }
+  }
+
+  function handleMouseUp() {
     dragRef.current = null;
   }
 
   function handleSvgClick() {
-    if (dragRef.current) return;
+    if (movedRef.current) {
+      movedRef.current = false;
+      return;
+    }
     onSelect?.(null);
   }
 
@@ -158,9 +283,9 @@ function SceneCanvas({
         viewBox={`0 0 ${W} ${H}`}
         className="block h-auto w-full"
         preserveAspectRatio="xMidYMid meet"
-        onMouseMove={handleSvgMouseMove}
-        onMouseUp={handleSvgMouseUp}
-        onMouseLeave={handleSvgMouseUp}
+        onMouseMove={handleMouseMove}
+        onMouseUp={handleMouseUp}
+        onMouseLeave={handleMouseUp}
         onClick={handleSvgClick}
       >
         {/* grid */}
@@ -222,12 +347,139 @@ function SceneCanvas({
             selectedId,
             clickedButtonId,
             onClick: onClickButton,
-            onMouseDown: (e) => handleShapeMouseDown(e, s.id),
+            onMouseDown: onUpdateShape
+              ? (e) => beginMove(e, s)
+              : undefined,
           }),
         )}
+
+        {/* Resize handles for the selected shape */}
+        {onUpdateShape &&
+          scene.shapes
+            .filter((s) => s.id === selectedId)
+            .map((s) =>
+              renderHandles(s, toX, toY, dx, (e, h) => beginResize(e, s, h)),
+            )}
       </svg>
     </div>
   );
+}
+
+function movePatch(s: SceneShape, dxw: number, dyw: number): Partial<SceneShape> {
+  if (s.kind === "point" || s.kind === "text") {
+    return { x: round(s.x + dxw), y: round(s.y + dyw) };
+  }
+  if (s.kind === "line") {
+    return {
+      x1: round(s.x1 + dxw),
+      y1: round(s.y1 + dyw),
+      x2: round(s.x2 + dxw),
+      y2: round(s.y2 + dyw),
+    };
+  }
+  return { cx: round(s.cx + dxw), cy: round(s.cy + dyw) };
+}
+
+function resizePatch(
+  s: SceneShape,
+  handle: ResizeHandle,
+  wx: number,
+  wy: number,
+): Partial<SceneShape> | null {
+  if (s.kind === "line") {
+    if (handle === "end1") return { x1: round(wx), y1: round(wy) };
+    if (handle === "end2") return { x2: round(wx), y2: round(wy) };
+    return null;
+  }
+  if (s.kind === "circle") {
+    if (handle !== "radius") return null;
+    const r = Math.max(0.2, Math.hypot(wx - s.cx, wy - s.cy));
+    return { r: round(r) };
+  }
+  if (s.kind === "rect" || s.kind === "button") {
+    // The corner opposite to the dragged handle stays fixed.
+    const left = s.cx - s.w / 2;
+    const right = s.cx + s.w / 2;
+    const top = s.cy + s.h / 2;
+    const bottom = s.cy - s.h / 2;
+    let fixedX = 0;
+    let fixedY = 0;
+    if (handle === "tl") {
+      fixedX = right;
+      fixedY = bottom;
+    } else if (handle === "tr") {
+      fixedX = left;
+      fixedY = bottom;
+    } else if (handle === "bl") {
+      fixedX = right;
+      fixedY = top;
+    } else if (handle === "br") {
+      fixedX = left;
+      fixedY = top;
+    } else return null;
+    const nw = Math.max(0.4, Math.abs(wx - fixedX));
+    const nh = Math.max(0.4, Math.abs(wy - fixedY));
+    const ncx = (wx + fixedX) / 2;
+    const ncy = (wy + fixedY) / 2;
+    return { cx: round(ncx), cy: round(ncy), w: round(nw), h: round(nh) };
+  }
+  return null;
+}
+
+function renderHandles(
+  s: SceneShape,
+  toX: (wx: number) => number,
+  toY: (wy: number) => number,
+  dx: number,
+  onMouseDown: (e: React.MouseEvent, h: ResizeHandle) => void,
+): React.ReactNode {
+  const handleStyle = { cursor: "nwse-resize" } as React.CSSProperties;
+  const dot = (x: number, y: number, h: ResizeHandle, cursor: string) => (
+    <circle
+      key={h}
+      cx={x}
+      cy={y}
+      r="5"
+      fill="#22d3ee"
+      stroke="#0a0a0a"
+      strokeWidth="1.5"
+      style={{ cursor }}
+      onMouseDown={(e) => onMouseDown(e, h)}
+    />
+  );
+
+  if (s.kind === "line") {
+    return (
+      <g key={`${s.id}-handles`}>
+        {dot(toX(s.x1), toY(s.y1), "end1", "grab")}
+        {dot(toX(s.x2), toY(s.y2), "end2", "grab")}
+      </g>
+    );
+  }
+  if (s.kind === "circle") {
+    return (
+      <g key={`${s.id}-handles`}>
+        {dot(toX(s.cx + s.r), toY(s.cy), "radius", "ew-resize")}
+      </g>
+    );
+  }
+  if (s.kind === "rect" || s.kind === "button") {
+    const left = s.cx - s.w / 2;
+    const right = s.cx + s.w / 2;
+    const top = s.cy + s.h / 2;
+    const bottom = s.cy - s.h / 2;
+    return (
+      <g key={`${s.id}-handles`}>
+        {dot(toX(left), toY(top), "tl", "nwse-resize")}
+        {dot(toX(right), toY(top), "tr", "nesw-resize")}
+        {dot(toX(left), toY(bottom), "bl", "nesw-resize")}
+        {dot(toX(right), toY(bottom), "br", "nwse-resize")}
+      </g>
+    );
+  }
+  // point/text: just highlight, no handles
+  void handleStyle;
+  return null;
 }
 
 function renderShape(
@@ -246,7 +498,7 @@ function renderShape(
   const isSelected = ctx.selectedId === s.id;
   const selectionStroke = isSelected ? "#22d3ee" : undefined;
 
-  const interact = {
+  const interact: { onMouseDown?: (e: React.MouseEvent<SVGGElement>) => void; style?: React.CSSProperties } = {
     onMouseDown: ctx.onMouseDown,
     style: ctx.onMouseDown ? { cursor: "grab" } : undefined,
   };
@@ -511,6 +763,8 @@ export function SceneEditor({
   onChange: (next: Scene) => void;
 }) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [boundsOpen, setBoundsOpen] = useState(false);
+
   const selected = useMemo(
     () => scene.shapes.find((s) => s.id === selectedId) ?? null,
     [scene.shapes, selectedId],
@@ -554,35 +808,20 @@ export function SceneEditor({
     if (selectedId === id) setSelectedId(null);
   }
 
-  function moveShape(id: string, dxw: number, dyw: number) {
-    const s = scene.shapes.find((x) => x.id === id);
-    if (!s) return;
-    if (s.kind === "point" || s.kind === "text") {
-      updateShape(id, { x: round(s.x + dxw), y: round(s.y + dyw) });
-    } else if (s.kind === "line") {
-      updateShape(id, {
-        x1: round(s.x1 + dxw),
-        y1: round(s.y1 + dyw),
-        x2: round(s.x2 + dxw),
-        y2: round(s.y2 + dyw),
-      });
-    } else {
-      updateShape(id, { cx: round(s.cx + dxw), cy: round(s.cy + dyw) });
-    }
-  }
-
   return (
-    <div className="space-y-4">
-      <div className="grid gap-4 md:grid-cols-[1fr_240px]">
-        <div className="space-y-3">
-          <Toolbar onAdd={addShape} />
+    <div className="overflow-hidden rounded-2xl bg-zinc-950 ring-1 ring-zinc-800">
+      <Toolbar onAdd={addShape} boundsOpen={boundsOpen} onToggleBounds={() => setBoundsOpen((v) => !v)} />
+
+      {boundsOpen && <ViewBoundsRow scene={scene} onChange={onChange} />}
+
+      <div className="grid gap-0 lg:grid-cols-[1fr_240px]">
+        <div className="p-3">
           <SceneCanvas
             scene={scene}
             selectedId={selectedId ?? undefined}
             onSelect={setSelectedId}
-            onMove={moveShape}
+            onUpdateShape={updateShape}
           />
-          <ViewBoundsRow scene={scene} onChange={onChange} />
         </div>
 
         <PropertyPanel
@@ -601,35 +840,51 @@ export function SceneEditor({
   );
 }
 
-function round(n: number): number {
-  return Math.round(n * 10) / 10;
-}
-
 function Toolbar({
   onAdd,
+  boundsOpen,
+  onToggleBounds,
 }: {
   onAdd: (kind: SceneShape["kind"]) => void;
+  boundsOpen: boolean;
+  onToggleBounds: () => void;
 }) {
   const items: { kind: SceneShape["kind"]; label: string }[] = [
     { kind: "point", label: "Point" },
     { kind: "line", label: "Line" },
     { kind: "circle", label: "Circle" },
-    { kind: "rect", label: "Rect" },
+    { kind: "rect", label: "Rectangle" },
     { kind: "text", label: "Text" },
     { kind: "button", label: "Button" },
   ];
   return (
-    <div className="flex flex-wrap items-center gap-2 rounded-lg bg-zinc-950 p-2 ring-1 ring-zinc-800">
-      {items.map((item) => (
-        <button
-          key={item.kind}
-          type="button"
-          onClick={() => onAdd(item.kind)}
-          className="rounded-md bg-zinc-900 px-3 py-1.5 text-xs font-medium text-zinc-200 ring-1 ring-zinc-800 hover:bg-zinc-800"
-        >
-          + {item.label}
-        </button>
-      ))}
+    <div className="flex items-center justify-between gap-3 border-b border-zinc-800 px-3 py-2">
+      <div className="flex items-center gap-1">
+        {items.map((item) => (
+          <button
+            key={item.kind}
+            type="button"
+            onClick={() => onAdd(item.kind)}
+            title={`Add ${item.label}`}
+            aria-label={`Add ${item.label}`}
+            className="flex h-9 w-9 items-center justify-center rounded-md text-zinc-300 transition hover:bg-zinc-800 hover:text-zinc-100"
+          >
+            {ICONS[item.kind]}
+          </button>
+        ))}
+      </div>
+      <button
+        type="button"
+        onClick={onToggleBounds}
+        className={
+          "rounded-md px-2.5 py-1 text-xs font-medium transition " +
+          (boundsOpen
+            ? "bg-zinc-800 text-zinc-100"
+            : "text-zinc-500 hover:bg-zinc-800 hover:text-zinc-200")
+        }
+      >
+        Canvas
+      </button>
     </div>
   );
 }
@@ -649,35 +904,45 @@ function PropertyPanel({
 }) {
   if (!selected) {
     return (
-      <div className="rounded-xl bg-zinc-950 p-4 text-xs text-zinc-500 ring-1 ring-zinc-800">
+      <div className="hidden border-l border-zinc-800 p-4 text-xs text-zinc-500 lg:block">
         <p className="font-medium text-zinc-300">No selection</p>
         <p className="mt-1">
-          Click a shape on the canvas to edit its properties, or add a new one
-          from the toolbar.
+          Pick a tool above to add a shape, or click an existing shape to edit
+          it.
         </p>
       </div>
     );
   }
 
   const fieldClass =
-    "w-full rounded-md bg-zinc-900 px-2.5 py-1.5 text-xs text-zinc-100 ring-1 ring-zinc-800 focus:outline-none focus:ring-2 focus:ring-cyan-400";
+    "w-full rounded-md bg-zinc-900 px-2 py-1 text-xs text-zinc-100 ring-1 ring-zinc-800 focus:outline-none focus:ring-2 focus:ring-cyan-400";
 
   return (
-    <div className="space-y-3 rounded-xl bg-zinc-950 p-4 ring-1 ring-zinc-800">
+    <div className="space-y-3 border-l border-zinc-800 p-4">
       <div className="flex items-center justify-between">
-        <p className="text-xs font-semibold uppercase tracking-wider text-zinc-500">
+        <p className="text-[11px] font-semibold uppercase tracking-wider text-zinc-400">
           {selected.kind}
         </p>
         <button
           type="button"
           onClick={onRemove}
-          className="text-xs font-medium text-rose-400 hover:text-rose-300"
+          className="rounded-md p-1 text-zinc-500 transition hover:bg-rose-500/10 hover:text-rose-300"
+          aria-label="Delete"
+          title="Delete"
         >
-          Delete
+          <svg
+            viewBox="0 0 16 16"
+            className="h-3.5 w-3.5"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+          >
+            <line x1="3" y1="3" x2="13" y2="13" />
+            <line x1="13" y1="3" x2="3" y2="13" />
+          </svg>
         </button>
       </div>
 
-      {/* Position fields per shape type */}
       {(selected.kind === "point" || selected.kind === "text") && (
         <div className="grid grid-cols-2 gap-2">
           <NumField
@@ -727,13 +992,13 @@ function PropertyPanel({
         selected.kind === "button") && (
         <div className="grid grid-cols-2 gap-2">
           <NumField
-            label="CX"
+            label="X"
             value={selected.cx}
             onChange={(v) => onUpdate({ cx: v })}
             className={fieldClass}
           />
           <NumField
-            label="CY"
+            label="Y"
             value={selected.cy}
             onChange={(v) => onUpdate({ cy: v })}
             className={fieldClass}
@@ -751,13 +1016,13 @@ function PropertyPanel({
       {(selected.kind === "rect" || selected.kind === "button") && (
         <div className="grid grid-cols-2 gap-2">
           <NumField
-            label="Width"
+            label="W"
             value={selected.w}
             onChange={(v) => onUpdate({ w: v })}
             className={fieldClass}
           />
           <NumField
-            label="Height"
+            label="H"
             value={selected.h}
             onChange={(v) => onUpdate({ h: v })}
             className={fieldClass}
@@ -765,84 +1030,41 @@ function PropertyPanel({
         </div>
       )}
 
-      {/* Color */}
-      <div>
-        <label className="block text-[10px] font-medium uppercase tracking-wider text-zinc-500">
-          Color
-        </label>
-        <div className="mt-1 grid grid-cols-6 gap-1">
-          {COLOR_NAMES.map((c) => (
-            <button
-              key={c}
-              type="button"
-              onClick={() => onUpdate({ color: c })}
-              title={c}
-              className={
-                "h-6 rounded-md ring-1 " +
-                (selected.color === c
-                  ? "ring-cyan-400 ring-2"
-                  : "ring-zinc-800")
-              }
-              style={{ backgroundColor: COLORS[c] }}
-            />
-          ))}
-        </div>
-      </div>
+      <ColorRow color={selected.color} onChange={(c) => onUpdate({ color: c })} />
 
-      {/* Label / text */}
       {(selected.kind === "point" ||
         selected.kind === "circle" ||
         selected.kind === "rect") && (
-        <div>
-          <label className="block text-[10px] font-medium uppercase tracking-wider text-zinc-500">
-            Label
-          </label>
-          <input
-            value={selected.label ?? ""}
-            onChange={(e) => onUpdate({ label: e.target.value })}
-            suppressHydrationWarning
-            className={`mt-1 ${fieldClass}`}
-          />
-        </div>
+        <TextField
+          label="Label"
+          value={selected.label ?? ""}
+          onChange={(v) => onUpdate({ label: v })}
+          className={fieldClass}
+        />
       )}
       {selected.kind === "text" && (
-        <div>
-          <label className="block text-[10px] font-medium uppercase tracking-wider text-zinc-500">
-            Text
-          </label>
-          <input
-            value={selected.text}
-            onChange={(e) => onUpdate({ text: e.target.value })}
-            suppressHydrationWarning
-            className={`mt-1 ${fieldClass}`}
-          />
-        </div>
+        <TextField
+          label="Text"
+          value={selected.text}
+          onChange={(v) => onUpdate({ text: v })}
+          className={fieldClass}
+        />
       )}
       {selected.kind === "button" && (
         <>
-          <div>
-            <label className="block text-[10px] font-medium uppercase tracking-wider text-zinc-500">
-              Label
-            </label>
-            <input
-              value={selected.label}
-              onChange={(e) => onUpdate({ label: e.target.value })}
-              suppressHydrationWarning
-              className={`mt-1 ${fieldClass}`}
-            />
-          </div>
-          <div>
-            <label className="block text-[10px] font-medium uppercase tracking-wider text-zinc-500">
-              Button ID
-            </label>
-            <input
-              value={selected.buttonId}
-              onChange={(e) => onUpdate({ buttonId: e.target.value })}
-              suppressHydrationWarning
-              className={`mt-1 ${fieldClass}`}
-            />
-          </div>
-          <label className="flex items-center gap-2 text-xs text-zinc-300">
+          <TextField
+            label="Label"
+            value={selected.label}
+            onChange={(v) => onUpdate({ label: v })}
+            className={fieldClass}
+          />
+          <TextField
+            label="Button ID"
+            value={selected.buttonId}
+            onChange={(v) => onUpdate({ buttonId: v })}
+            className={fieldClass}
+          />
+          <label className="flex items-center gap-2 rounded-md bg-zinc-900 px-2 py-1.5 text-xs text-zinc-300 ring-1 ring-zinc-800">
             <input
               type="checkbox"
               checked={correctButtonId === selected.buttonId}
@@ -852,10 +1074,42 @@ function PropertyPanel({
               suppressHydrationWarning
               className="accent-cyan-500"
             />
-            Mark as correct answer
+            Correct answer
           </label>
         </>
       )}
+    </div>
+  );
+}
+
+function ColorRow({
+  color,
+  onChange,
+}: {
+  color: string;
+  onChange: (c: string) => void;
+}) {
+  return (
+    <div>
+      <label className="block text-[10px] font-medium uppercase tracking-wider text-zinc-500">
+        Color
+      </label>
+      <div className="mt-1 flex flex-wrap gap-1">
+        {COLOR_NAMES.map((c) => (
+          <button
+            key={c}
+            type="button"
+            onClick={() => onChange(c)}
+            title={c}
+            aria-label={c}
+            className={
+              "h-5 w-5 rounded-full ring-1 transition " +
+              (color === c ? "ring-2 ring-cyan-400" : "ring-zinc-800")
+            }
+            style={{ backgroundColor: COLORS[c] }}
+          />
+        ))}
+      </div>
     </div>
   );
 }
@@ -891,6 +1145,32 @@ function NumField({
   );
 }
 
+function TextField({
+  label,
+  value,
+  onChange,
+  className,
+}: {
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+  className: string;
+}) {
+  return (
+    <div>
+      <label className="block text-[10px] font-medium uppercase tracking-wider text-zinc-500">
+        {label}
+      </label>
+      <input
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        suppressHydrationWarning
+        className={`mt-1 ${className}`}
+      />
+    </div>
+  );
+}
+
 function ViewBoundsRow({
   scene,
   onChange,
@@ -904,7 +1184,7 @@ function ViewBoundsRow({
     onChange({ ...scene, view: { ...scene.view, ...patch } });
   }
   return (
-    <div className="grid grid-cols-4 gap-2">
+    <div className="grid grid-cols-4 gap-2 border-b border-zinc-800 bg-zinc-925 p-3">
       <NumField
         label="X min"
         value={scene.view.xmin}
@@ -941,17 +1221,19 @@ function HintRow({
   onChange: (next: Scene) => void;
 }) {
   return (
-    <div className="rounded-xl bg-zinc-950 p-4 ring-1 ring-zinc-800">
-      <label className="block text-[10px] font-medium uppercase tracking-wider text-zinc-500">
-        Hint (shown when the learner picks the wrong answer)
-      </label>
-      <input
-        value={scene.hint ?? ""}
-        onChange={(e) => onChange({ ...scene, hint: e.target.value })}
-        placeholder="e.g. Count it on your fingers."
-        suppressHydrationWarning
-        className="mt-1 w-full rounded-md bg-zinc-900 px-3 py-2 text-sm text-zinc-100 ring-1 ring-zinc-800 placeholder:text-zinc-600 focus:outline-none focus:ring-2 focus:ring-cyan-400"
-      />
+    <div className="border-t border-zinc-800 p-3">
+      <div className="flex items-center gap-2">
+        <span className="shrink-0 text-[10px] font-medium uppercase tracking-wider text-zinc-500">
+          Hint
+        </span>
+        <input
+          value={scene.hint ?? ""}
+          onChange={(e) => onChange({ ...scene, hint: e.target.value })}
+          placeholder="Shown when the learner picks the wrong answer"
+          suppressHydrationWarning
+          className="flex-1 rounded-md bg-zinc-900 px-3 py-1.5 text-xs text-zinc-100 ring-1 ring-zinc-800 placeholder:text-zinc-600 focus:outline-none focus:ring-2 focus:ring-cyan-400"
+        />
+      </div>
     </div>
   );
 }
