@@ -510,6 +510,16 @@ function InteractiveView({
           {block.prompt}
         </h2>
       )}
+      {block.imageUrl && (
+        <div className="mt-5 overflow-hidden rounded-xl bg-zinc-900 ring-1 ring-zinc-800">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={block.imageUrl}
+            alt=""
+            className="mx-auto block max-h-[20rem] w-full object-contain"
+          />
+        </div>
+      )}
       <div className="mt-6">
         <ScrollScriptRunner code={block.code} onCheckResult={onResult} />
       </div>

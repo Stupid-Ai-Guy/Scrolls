@@ -728,6 +728,29 @@ function InteractiveEditor({
       />
 
       <div>
+        <p className="mb-2 text-xs font-medium uppercase tracking-wider text-zinc-500">
+          Diagram (optional)
+        </p>
+        <input
+          value={block.imageUrl ?? ""}
+          onChange={(e) => onUpdate({ imageUrl: e.target.value })}
+          placeholder="Image URL — shown above the interactive scene"
+          suppressHydrationWarning
+          className={fieldClass}
+        />
+        {block.imageUrl && (
+          <div className="mt-2 overflow-hidden rounded-lg bg-zinc-900 ring-1 ring-zinc-800">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={block.imageUrl}
+              alt=""
+              className="block max-h-56 w-full object-contain"
+            />
+          </div>
+        )}
+      </div>
+
+      <div>
         <div className="mb-2 flex items-center justify-between">
           <p className="text-xs font-medium uppercase tracking-wider text-zinc-500">
             ScrollScript code

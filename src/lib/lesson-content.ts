@@ -23,6 +23,7 @@ export type InteractiveBlock = {
   type: "interactive";
   prompt?: string;
   code: string;
+  imageUrl?: string;
 };
 
 export type Block = TextBlock | ImageBlock | QuestionBlock | InteractiveBlock;
