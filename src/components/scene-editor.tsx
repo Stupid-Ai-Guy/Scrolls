@@ -400,12 +400,12 @@ function SceneCanvas({
   const viewIsDefault = view.zoom === 1 && view.panX === 0 && view.panY === 0;
 
   return (
-    <div className="relative h-full overflow-hidden rounded-2xl bg-zinc-925 ring-1 ring-zinc-800">
+    <div className="relative overflow-hidden">
       {editable && !viewIsDefault && (
         <button
           type="button"
           onClick={resetView}
-          className="absolute right-3 top-3 z-10 rounded-md bg-zinc-900/90 px-2 py-1 text-[10px] font-medium text-zinc-300 ring-1 ring-zinc-800 backdrop-blur hover:bg-zinc-800"
+          className="absolute right-4 top-4 z-10 rounded-full bg-zinc-900/90 px-3 py-1 text-[10px] font-medium text-zinc-300 shadow-lg shadow-black/40 ring-1 ring-white/5 backdrop-blur transition hover:bg-zinc-800 hover:text-zinc-100"
           title="Reset zoom and pan"
         >
           {Math.round(view.zoom * 100)}% · Reset
@@ -425,15 +425,21 @@ function SceneCanvas({
         <defs>
           <pattern
             id="scene-dots"
-            width="22"
-            height="22"
+            width="24"
+            height="24"
             patternUnits="userSpaceOnUse"
           >
-            <circle cx="11" cy="11" r="1.2" fill="#3f3f46" />
+            <circle cx="12" cy="12" r="1" fill="#27272a" />
           </pattern>
         </defs>
-        <rect width={W} height={H} fill="#0f0f12" />
-        <rect width={W} height={H} fill="url(#scene-dots)" />
+        <rect x={-W * 2} y={-H * 2} width={W * 5} height={H * 5} fill="#0a0a0c" />
+        <rect
+          x={-W * 2}
+          y={-H * 2}
+          width={W * 5}
+          height={H * 5}
+          fill="url(#scene-dots)"
+        />
 
         {scene.shapes.map((s) =>
           renderShape(s, toX, toY, dx, {
@@ -903,41 +909,44 @@ export function SceneEditor({
 
   return (
     <div className="overflow-hidden rounded-2xl bg-zinc-950 ring-1 ring-zinc-800">
-      <ContextBar
-        selected={selected}
-        correctButtonId={scene.correctButtonId}
-        onUpdate={(patch) => selected && updateShape(selected.id, patch)}
-        onRemove={() => selected && removeShape(selected.id)}
-        onSetCorrect={(buttonId) =>
-          onChange({ ...scene, correctButtonId: buttonId })
-        }
-      />
-      <div className="h-px bg-zinc-800" />
-
-      <div className="flex gap-3 p-3">
-        <Sidebar
-          activeTool={activeTool}
-          onSelectTool={(t) => {
-            setActiveTool(t);
-            if (t !== "select") setSelectedId(null);
-          }}
-          boundsOpen={boundsOpen}
-          onToggleBounds={() => setBoundsOpen((v) => !v)}
-        />
-
-        <div className="min-w-0 flex-1">
-          <SceneCanvas
-            scene={scene}
-            selectedId={selectedId ?? undefined}
+      <div className="relative bg-[#0a0a0c]">
+        {/* Floating sidebar */}
+        <div className="absolute left-4 top-4 z-20">
+          <Sidebar
             activeTool={activeTool}
-            onSelect={(id) => {
-              if (activeTool !== "select") setActiveTool("select");
-              setSelectedId(id);
+            onSelectTool={(t) => {
+              setActiveTool(t);
+              if (t !== "select") setSelectedId(null);
             }}
-            onUpdateShape={updateShape}
-            onPlaceShape={placeShape}
+            boundsOpen={boundsOpen}
+            onToggleBounds={() => setBoundsOpen((v) => !v)}
           />
         </div>
+
+        {/* Floating contextual top bar */}
+        <div className="absolute left-1/2 top-4 z-20 -translate-x-1/2">
+          <ContextBar
+            selected={selected}
+            correctButtonId={scene.correctButtonId}
+            onUpdate={(patch) => selected && updateShape(selected.id, patch)}
+            onRemove={() => selected && removeShape(selected.id)}
+            onSetCorrect={(buttonId) =>
+              onChange({ ...scene, correctButtonId: buttonId })
+            }
+          />
+        </div>
+
+        <SceneCanvas
+          scene={scene}
+          selectedId={selectedId ?? undefined}
+          activeTool={activeTool}
+          onSelect={(id) => {
+            if (activeTool !== "select") setActiveTool("select");
+            setSelectedId(id);
+          }}
+          onUpdateShape={updateShape}
+          onPlaceShape={placeShape}
+        />
       </div>
 
       {boundsOpen && <ViewBoundsRow scene={scene} onChange={onChange} />}
@@ -995,7 +1004,7 @@ function Sidebar({
     activeTool === "point" || activeTool === "circle" || activeTool === "rect";
 
   return (
-    <div className="relative flex flex-col gap-1 rounded-2xl bg-zinc-900 p-2 ring-1 ring-zinc-800">
+    <div className="relative flex flex-col gap-1 rounded-2xl bg-zinc-900/95 p-1.5 shadow-2xl shadow-black/60 ring-1 ring-white/5 backdrop-blur">
       <ToolButton
         label="Select"
         active={activeTool === "select"}
@@ -1188,28 +1197,18 @@ function ContextBar({
 }) {
   if (!selected) {
     return (
-      <div className="flex items-center gap-2 px-4 py-2.5 text-xs text-zinc-500">
-        <svg
-          viewBox="0 0 16 16"
-          className="h-3.5 w-3.5 text-zinc-600"
-          fill="currentColor"
-        >
-          <circle cx="8" cy="8" r="3" />
-        </svg>
-        <span>
-          Pick a tool from the sidebar to add a shape, or click an existing
-          shape to edit it.
-        </span>
+      <div className="rounded-full bg-zinc-900/95 px-4 py-1.5 text-[11px] text-zinc-500 shadow-lg shadow-black/40 ring-1 ring-white/5 backdrop-blur">
+        Pick a tool to add a shape · click an existing shape to edit
       </div>
     );
   }
 
   const inputCls =
-    "rounded-md bg-zinc-900 px-2 py-1 text-xs text-zinc-100 ring-1 ring-zinc-800 placeholder:text-zinc-600 focus:outline-none focus:ring-2 focus:ring-cyan-400";
+    "rounded-md bg-zinc-950/80 px-2 py-1 text-xs text-zinc-100 ring-1 ring-zinc-800 placeholder:text-zinc-600 focus:outline-none focus:ring-2 focus:ring-cyan-400";
 
   return (
-    <div className="flex flex-wrap items-center gap-2 px-3 py-2">
-      <span className="rounded-md bg-zinc-900 px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-zinc-400 ring-1 ring-zinc-800">
+    <div className="flex flex-wrap items-center gap-2 rounded-full bg-zinc-900/95 px-3 py-1.5 shadow-2xl shadow-black/60 ring-1 ring-white/5 backdrop-blur">
+      <span className="text-[10px] font-semibold uppercase tracking-wider text-zinc-500">
         {selected.kind}
       </span>
 
@@ -1404,31 +1403,36 @@ function ViewBoundsRow({
     onChange({ ...scene, view: { ...scene.view, ...patch } });
   }
   return (
-    <div className="grid grid-cols-4 gap-2 border-t border-zinc-800 px-3 py-3">
-      <NumField
-        label="X min"
-        value={scene.view.xmin}
-        onChange={(v) => update({ xmin: v })}
-        className={fieldClass}
-      />
-      <NumField
-        label="X max"
-        value={scene.view.xmax}
-        onChange={(v) => update({ xmax: v })}
-        className={fieldClass}
-      />
-      <NumField
-        label="Y min"
-        value={scene.view.ymin}
-        onChange={(v) => update({ ymin: v })}
-        className={fieldClass}
-      />
-      <NumField
-        label="Y max"
-        value={scene.view.ymax}
-        onChange={(v) => update({ ymax: v })}
-        className={fieldClass}
-      />
+    <div className="flex items-center gap-3 border-t border-zinc-800/50 px-4 py-3">
+      <span className="shrink-0 text-[10px] font-semibold uppercase tracking-wider text-zinc-500">
+        Bounds
+      </span>
+      <div className="grid flex-1 grid-cols-4 gap-2">
+        <NumField
+          label="X min"
+          value={scene.view.xmin}
+          onChange={(v) => update({ xmin: v })}
+          className={fieldClass}
+        />
+        <NumField
+          label="X max"
+          value={scene.view.xmax}
+          onChange={(v) => update({ xmax: v })}
+          className={fieldClass}
+        />
+        <NumField
+          label="Y min"
+          value={scene.view.ymin}
+          onChange={(v) => update({ ymin: v })}
+          className={fieldClass}
+        />
+        <NumField
+          label="Y max"
+          value={scene.view.ymax}
+          onChange={(v) => update({ ymax: v })}
+          className={fieldClass}
+        />
+      </div>
     </div>
   );
 }
@@ -1441,19 +1445,17 @@ function HintRow({
   onChange: (next: Scene) => void;
 }) {
   return (
-    <div className="border-t border-zinc-800 p-3">
-      <div className="flex items-center gap-2">
-        <span className="shrink-0 text-[10px] font-medium uppercase tracking-wider text-zinc-500">
-          Hint
-        </span>
-        <input
-          value={scene.hint ?? ""}
-          onChange={(e) => onChange({ ...scene, hint: e.target.value })}
-          placeholder="Shown when the learner picks the wrong answer"
-          suppressHydrationWarning
-          className="flex-1 rounded-md bg-zinc-900 px-3 py-1.5 text-xs text-zinc-100 ring-1 ring-zinc-800 placeholder:text-zinc-600 focus:outline-none focus:ring-2 focus:ring-cyan-400"
-        />
-      </div>
+    <div className="flex items-center gap-3 border-t border-zinc-800/50 px-4 py-3">
+      <span className="shrink-0 text-[10px] font-semibold uppercase tracking-wider text-zinc-500">
+        Hint
+      </span>
+      <input
+        value={scene.hint ?? ""}
+        onChange={(e) => onChange({ ...scene, hint: e.target.value })}
+        placeholder="Shown when the learner picks the wrong answer"
+        suppressHydrationWarning
+        className="flex-1 bg-transparent text-xs text-zinc-100 placeholder:text-zinc-600 focus:outline-none"
+      />
     </div>
   );
 }
