@@ -829,7 +829,18 @@ export function SceneEditor({
 
   return (
     <div className="overflow-hidden rounded-2xl bg-zinc-950 ring-1 ring-zinc-800">
-      <div className="relative flex gap-3 p-3">
+      <ContextBar
+        selected={selected}
+        correctButtonId={scene.correctButtonId}
+        onUpdate={(patch) => selected && updateShape(selected.id, patch)}
+        onRemove={() => selected && removeShape(selected.id)}
+        onSetCorrect={(buttonId) =>
+          onChange({ ...scene, correctButtonId: buttonId })
+        }
+      />
+      <div className="h-px bg-zinc-800" />
+
+      <div className="flex gap-3 p-3">
         <Sidebar
           activeTool={activeTool}
           onSelectTool={(t) => {
@@ -853,18 +864,6 @@ export function SceneEditor({
             onPlaceShape={placeShape}
           />
         </div>
-
-        {selected && (
-          <PropertyPanel
-            selected={selected}
-            correctButtonId={scene.correctButtonId}
-            onUpdate={(patch) => updateShape(selected.id, patch)}
-            onRemove={() => removeShape(selected.id)}
-            onSetCorrect={(buttonId) =>
-              onChange({ ...scene, correctButtonId: buttonId })
-            }
-          />
-        )}
       </div>
 
       {boundsOpen && <ViewBoundsRow scene={scene} onChange={onChange} />}
@@ -1098,172 +1097,99 @@ function FlyoutItem({
   );
 }
 
-// ---------------- Property panel ----------------
+// ---------------- Context bar ----------------
 
-function PropertyPanel({
+function ContextBar({
   selected,
   correctButtonId,
   onUpdate,
   onRemove,
   onSetCorrect,
 }: {
-  selected: SceneShape;
+  selected: SceneShape | null;
   correctButtonId?: string;
   onUpdate: (patch: Partial<SceneShape>) => void;
   onRemove: () => void;
   onSetCorrect: (id: string | undefined) => void;
 }) {
-  const fieldClass =
-    "w-full rounded-md bg-zinc-900 px-2 py-1 text-xs text-zinc-100 ring-1 ring-zinc-800 focus:outline-none focus:ring-2 focus:ring-cyan-400";
+  if (!selected) {
+    return (
+      <div className="flex items-center gap-2 px-4 py-2.5 text-xs text-zinc-500">
+        <svg
+          viewBox="0 0 16 16"
+          className="h-3.5 w-3.5 text-zinc-600"
+          fill="currentColor"
+        >
+          <circle cx="8" cy="8" r="3" />
+        </svg>
+        <span>
+          Pick a tool from the sidebar to add a shape, or click an existing
+          shape to edit it.
+        </span>
+      </div>
+    );
+  }
+
+  const inputCls =
+    "rounded-md bg-zinc-900 px-2 py-1 text-xs text-zinc-100 ring-1 ring-zinc-800 placeholder:text-zinc-600 focus:outline-none focus:ring-2 focus:ring-cyan-400";
 
   return (
-    <div className="w-56 shrink-0 space-y-3 rounded-2xl bg-zinc-900 p-3 ring-1 ring-zinc-800">
-      <div className="flex items-center justify-between">
-        <p className="text-[11px] font-semibold uppercase tracking-wider text-zinc-400">
-          {selected.kind}
-        </p>
-        <button
-          type="button"
-          onClick={onRemove}
-          className="rounded-md p-1 text-zinc-500 transition hover:bg-rose-500/10 hover:text-rose-300"
-          aria-label="Delete"
-          title="Delete"
-        >
-          <svg
-            viewBox="0 0 16 16"
-            className="h-3.5 w-3.5"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-          >
-            <line x1="3" y1="3" x2="13" y2="13" />
-            <line x1="13" y1="3" x2="3" y2="13" />
-          </svg>
-        </button>
-      </div>
+    <div className="flex flex-wrap items-center gap-2 px-3 py-2">
+      <span className="rounded-md bg-zinc-900 px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-zinc-400 ring-1 ring-zinc-800">
+        {selected.kind}
+      </span>
 
-      {(selected.kind === "point" || selected.kind === "text") && (
-        <div className="grid grid-cols-2 gap-2">
-          <NumField
-            label="X"
-            value={selected.x}
-            onChange={(v) => onUpdate({ x: v })}
-            className={fieldClass}
-          />
-          <NumField
-            label="Y"
-            value={selected.y}
-            onChange={(v) => onUpdate({ y: v })}
-            className={fieldClass}
-          />
-        </div>
-      )}
-      {selected.kind === "line" && (
-        <div className="grid grid-cols-2 gap-2">
-          <NumField
-            label="X1"
-            value={selected.x1}
-            onChange={(v) => onUpdate({ x1: v })}
-            className={fieldClass}
-          />
-          <NumField
-            label="Y1"
-            value={selected.y1}
-            onChange={(v) => onUpdate({ y1: v })}
-            className={fieldClass}
-          />
-          <NumField
-            label="X2"
-            value={selected.x2}
-            onChange={(v) => onUpdate({ x2: v })}
-            className={fieldClass}
-          />
-          <NumField
-            label="Y2"
-            value={selected.y2}
-            onChange={(v) => onUpdate({ y2: v })}
-            className={fieldClass}
-          />
-        </div>
-      )}
-      {(selected.kind === "circle" ||
-        selected.kind === "rect" ||
-        selected.kind === "button") && (
-        <div className="grid grid-cols-2 gap-2">
-          <NumField
-            label="X"
-            value={selected.cx}
-            onChange={(v) => onUpdate({ cx: v })}
-            className={fieldClass}
-          />
-          <NumField
-            label="Y"
-            value={selected.cy}
-            onChange={(v) => onUpdate({ cy: v })}
-            className={fieldClass}
-          />
-        </div>
-      )}
-      {selected.kind === "circle" && (
-        <NumField
-          label="Radius"
-          value={selected.r}
-          onChange={(v) => onUpdate({ r: v })}
-          className={fieldClass}
-        />
-      )}
-      {(selected.kind === "rect" || selected.kind === "button") && (
-        <div className="grid grid-cols-2 gap-2">
-          <NumField
-            label="W"
-            value={selected.w}
-            onChange={(v) => onUpdate({ w: v })}
-            className={fieldClass}
-          />
-          <NumField
-            label="H"
-            value={selected.h}
-            onChange={(v) => onUpdate({ h: v })}
-            className={fieldClass}
-          />
-        </div>
-      )}
+      <Sep />
 
-      <ColorRow color={selected.color} onChange={(c) => onUpdate({ color: c })} />
+      <ColorBar
+        color={selected.color}
+        onChange={(c) => onUpdate({ color: c })}
+      />
 
       {(selected.kind === "point" ||
         selected.kind === "circle" ||
         selected.kind === "rect") && (
-        <TextField
-          label="Label"
-          value={selected.label ?? ""}
-          onChange={(v) => onUpdate({ label: v })}
-          className={fieldClass}
-        />
+        <>
+          <Sep />
+          <input
+            value={selected.label ?? ""}
+            onChange={(e) => onUpdate({ label: e.target.value })}
+            placeholder="Label"
+            suppressHydrationWarning
+            className={`${inputCls} w-32`}
+          />
+        </>
       )}
       {selected.kind === "text" && (
-        <TextField
-          label="Text"
-          value={selected.text}
-          onChange={(v) => onUpdate({ text: v })}
-          className={fieldClass}
-        />
+        <>
+          <Sep />
+          <input
+            value={selected.text}
+            onChange={(e) => onUpdate({ text: e.target.value })}
+            placeholder="Text"
+            suppressHydrationWarning
+            className={`${inputCls} w-40`}
+          />
+        </>
       )}
       {selected.kind === "button" && (
         <>
-          <TextField
-            label="Label"
+          <Sep />
+          <input
             value={selected.label}
-            onChange={(v) => onUpdate({ label: v })}
-            className={fieldClass}
+            onChange={(e) => onUpdate({ label: e.target.value })}
+            placeholder="Label"
+            suppressHydrationWarning
+            className={`${inputCls} w-28`}
           />
-          <TextField
-            label="Button ID"
+          <input
             value={selected.buttonId}
-            onChange={(v) => onUpdate({ buttonId: v })}
-            className={fieldClass}
+            onChange={(e) => onUpdate({ buttonId: e.target.value })}
+            placeholder="ID"
+            suppressHydrationWarning
+            className={`${inputCls} w-24`}
           />
-          <label className="flex items-center gap-2 rounded-md bg-zinc-950 px-2 py-1.5 text-xs text-zinc-300 ring-1 ring-zinc-800">
+          <label className="flex items-center gap-1.5 rounded-md bg-zinc-900 px-2 py-1 text-xs text-zinc-300 ring-1 ring-zinc-800">
             <input
               type="checkbox"
               checked={correctButtonId === selected.buttonId}
@@ -1273,15 +1199,38 @@ function PropertyPanel({
               suppressHydrationWarning
               className="accent-cyan-500"
             />
-            Correct answer
+            Correct
           </label>
         </>
       )}
+
+      <button
+        type="button"
+        onClick={onRemove}
+        className="ml-auto rounded-md p-1.5 text-zinc-500 transition hover:bg-rose-500/10 hover:text-rose-300"
+        aria-label="Delete"
+        title="Delete"
+      >
+        <svg
+          viewBox="0 0 16 16"
+          className="h-3.5 w-3.5"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+        >
+          <line x1="3" y1="3" x2="13" y2="13" />
+          <line x1="13" y1="3" x2="3" y2="13" />
+        </svg>
+      </button>
     </div>
   );
 }
 
-function ColorRow({
+function Sep() {
+  return <div className="h-5 w-px bg-zinc-800" />;
+}
+
+function ColorBar({
   color,
   onChange,
 }: {
@@ -1289,26 +1238,23 @@ function ColorRow({
   onChange: (c: string) => void;
 }) {
   return (
-    <div>
-      <label className="block text-[10px] font-medium uppercase tracking-wider text-zinc-500">
-        Color
-      </label>
-      <div className="mt-1 flex flex-wrap gap-1">
-        {COLOR_NAMES.map((c) => (
-          <button
-            key={c}
-            type="button"
-            onClick={() => onChange(c)}
-            title={c}
-            aria-label={c}
-            className={
-              "h-5 w-5 rounded-full ring-1 transition " +
-              (color === c ? "ring-2 ring-cyan-400" : "ring-zinc-800")
-            }
-            style={{ backgroundColor: COLORS[c] }}
-          />
-        ))}
-      </div>
+    <div className="flex items-center gap-1">
+      {COLOR_NAMES.map((c) => (
+        <button
+          key={c}
+          type="button"
+          onClick={() => onChange(c)}
+          title={c}
+          aria-label={c}
+          className={
+            "h-5 w-5 rounded-full ring-1 transition " +
+            (color === c
+              ? "ring-2 ring-cyan-400"
+              : "ring-zinc-700 hover:ring-zinc-500")
+          }
+          style={{ backgroundColor: COLORS[c] }}
+        />
+      ))}
     </div>
   );
 }
@@ -1337,32 +1283,6 @@ function NumField({
           const n = parseFloat(e.target.value);
           if (!Number.isNaN(n)) onChange(n);
         }}
-        suppressHydrationWarning
-        className={`mt-1 ${className}`}
-      />
-    </div>
-  );
-}
-
-function TextField({
-  label,
-  value,
-  onChange,
-  className,
-}: {
-  label: string;
-  value: string;
-  onChange: (v: string) => void;
-  className: string;
-}) {
-  return (
-    <div>
-      <label className="block text-[10px] font-medium uppercase tracking-wider text-zinc-500">
-        {label}
-      </label>
-      <input
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
         suppressHydrationWarning
         className={`mt-1 ${className}`}
       />
