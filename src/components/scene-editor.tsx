@@ -18,8 +18,8 @@ const COLORS: Record<string, string> = {
 };
 const COLOR_NAMES = Object.keys(COLORS);
 
-const W = 640;
-const H = 420;
+const W = 720;
+const H = 460;
 
 export const DEFAULT_SCENE: Scene = {
   view: { xmin: -8, xmax: 8, ymin: -6, ymax: 6 },
@@ -34,19 +34,27 @@ function round(n: number): number {
   return Math.round(n * 10) / 10;
 }
 
-function defaultShape(kind: SceneShape["kind"]): SceneShape {
+function makeShape(kind: SceneShape["kind"], wx: number, wy: number): SceneShape {
   const id = uid();
   switch (kind) {
     case "point":
-      return { id, kind, x: 0, y: 0, color: "emerald", label: "" };
+      return { id, kind, x: round(wx), y: round(wy), color: "emerald", label: "" };
     case "line":
-      return { id, kind, x1: -2, y1: 0, x2: 2, y2: 0, color: "emerald" };
+      return {
+        id,
+        kind,
+        x1: round(wx - 2),
+        y1: round(wy),
+        x2: round(wx + 2),
+        y2: round(wy),
+        color: "sky",
+      };
     case "circle":
       return {
         id,
         kind,
-        cx: 0,
-        cy: 0,
+        cx: round(wx),
+        cy: round(wy),
         r: 2,
         color: "emerald",
         label: "",
@@ -55,110 +63,152 @@ function defaultShape(kind: SceneShape["kind"]): SceneShape {
       return {
         id,
         kind,
-        cx: 0,
-        cy: 0,
+        cx: round(wx),
+        cy: round(wy),
         w: 3,
         h: 2,
         color: "slate",
         label: "",
       };
     case "text":
-      return { id, kind, x: 0, y: 0, text: "Text", color: "slate" };
+      return { id, kind, x: round(wx), y: round(wy), text: "Text", color: "slate" };
     case "button":
       return {
         id,
         kind,
-        cx: 0,
-        cy: 0,
+        cx: round(wx),
+        cy: round(wy),
         w: 3,
         h: 1.5,
         label: "Click",
         buttonId: `btn-${id}`,
-        color: "indigo",
+        color: "amber",
       };
   }
 }
 
 // ---------------- Icons ----------------
 
-const ICONS: Record<SceneShape["kind"], React.ReactNode> = {
-  point: (
-    <svg viewBox="0 0 16 16" className="h-4 w-4" fill="currentColor">
-      <circle cx="8" cy="8" r="3" />
-    </svg>
-  ),
-  line: (
+function CursorIcon() {
+  return (
     <svg
-      viewBox="0 0 16 16"
-      className="h-4 w-4"
+      viewBox="0 0 24 24"
+      className="h-5 w-5"
       fill="none"
       stroke="currentColor"
       strokeWidth="2"
+      strokeLinejoin="round"
       strokeLinecap="round"
     >
-      <line x1="3" y1="13" x2="13" y2="3" />
+      <path d="M4 3 L20 11 L13 13 L11 20 Z" />
     </svg>
-  ),
-  circle: (
+  );
+}
+
+function ShapesIcon() {
+  return (
     <svg
-      viewBox="0 0 16 16"
-      className="h-4 w-4"
+      viewBox="0 0 24 24"
+      className="h-5 w-5"
       fill="none"
       stroke="currentColor"
-      strokeWidth="2"
+      strokeWidth="1.8"
     >
-      <circle cx="8" cy="8" r="5" />
+      <circle cx="9" cy="9" r="5" />
+      <rect x="10" y="10" width="10" height="10" rx="1.5" />
     </svg>
-  ),
-  rect: (
+  );
+}
+
+function LineIcon() {
+  return (
     <svg
-      viewBox="0 0 16 16"
-      className="h-4 w-4"
+      viewBox="0 0 24 24"
+      className="h-5 w-5"
       fill="none"
       stroke="currentColor"
-      strokeWidth="2"
+      strokeWidth="2.5"
+      strokeLinecap="round"
     >
-      <rect x="3" y="4" width="10" height="8" rx="1" />
+      <line x1="4" y1="20" x2="20" y2="4" />
+      <circle cx="4" cy="20" r="1.5" fill="currentColor" stroke="none" />
+      <circle cx="20" cy="4" r="1.5" fill="currentColor" stroke="none" />
     </svg>
-  ),
-  text: (
-    <svg viewBox="0 0 16 16" className="h-4 w-4" fill="currentColor">
+  );
+}
+
+function TextIcon() {
+  return (
+    <svg viewBox="0 0 24 24" className="h-5 w-5" fill="currentColor">
       <text
-        x="8"
-        y="13"
+        x="12"
+        y="18"
         textAnchor="middle"
-        fontSize="13"
-        fontWeight="700"
+        fontSize="18"
+        fontWeight="800"
         fontFamily="ui-sans-serif, system-ui"
       >
         T
       </text>
     </svg>
-  ),
-  button: (
+  );
+}
+
+function ButtonIcon() {
+  return (
     <svg
-      viewBox="0 0 16 16"
-      className="h-4 w-4"
+      viewBox="0 0 24 24"
+      className="h-5 w-5"
       fill="none"
       stroke="currentColor"
       strokeWidth="2"
+      strokeLinejoin="round"
     >
-      <rect x="2" y="3" width="12" height="7" rx="2" />
-      <circle cx="8" cy="13" r="1.5" fill="currentColor" stroke="none" />
+      <rect x="3" y="6" width="18" height="10" rx="2.5" />
+      <path d="M9 19 L13 15 L17 19" />
     </svg>
-  ),
-};
+  );
+}
 
-// ---------------- Renderer ----------------
+function PointIcon() {
+  return (
+    <svg viewBox="0 0 24 24" className="h-5 w-5" fill="currentColor">
+      <circle cx="12" cy="12" r="5" />
+    </svg>
+  );
+}
 
-type ResizeHandle =
-  | "tl"
-  | "tr"
-  | "bl"
-  | "br"
-  | "end1"
-  | "end2"
-  | "radius";
+function CircleIcon() {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      className="h-5 w-5"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2.2"
+    >
+      <circle cx="12" cy="12" r="8" />
+    </svg>
+  );
+}
+
+function RectIcon() {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      className="h-5 w-5"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2.2"
+    >
+      <rect x="4" y="6" width="16" height="12" rx="2" />
+    </svg>
+  );
+}
+
+// ---------------- Drag types ----------------
+
+type ResizeHandle = "tl" | "tr" | "bl" | "br" | "end1" | "end2" | "radius";
 
 type DragState =
   | { type: "move"; shapeId: string; original: SceneShape; startWX: number; startWY: number }
@@ -171,12 +221,18 @@ type DragState =
       startWY: number;
     };
 
+// ---------------- Canvas ----------------
+
+type ActiveTool = "select" | SceneShape["kind"];
+
 type RendererProps = {
   scene: Scene;
   selectedId?: string;
   clickedButtonId?: string;
+  activeTool?: ActiveTool;
   onSelect?: (id: string | null) => void;
   onUpdateShape?: (id: string, patch: Partial<SceneShape>) => void;
+  onPlaceShape?: (kind: SceneShape["kind"], wx: number, wy: number) => void;
   onClickButton?: (buttonId: string) => void;
 };
 
@@ -184,8 +240,10 @@ function SceneCanvas({
   scene,
   selectedId,
   clickedButtonId,
+  activeTool = "select",
   onSelect,
   onUpdateShape,
+  onPlaceShape,
   onClickButton,
 }: RendererProps) {
   const svgRef = useRef<SVGSVGElement>(null);
@@ -197,8 +255,6 @@ function SceneCanvas({
   const dy = ymax - ymin;
   const toX = (wx: number) => ((wx - xmin) / dx) * W;
   const toY = (wy: number) => ((ymax - wy) / dy) * H;
-  const showXAxis = ymin <= 0 && ymax >= 0;
-  const showYAxis = xmin <= 0 && xmax >= 0;
 
   function svgToWorld(clientX: number, clientY: number): [number, number] {
     const svg = svgRef.current;
@@ -212,7 +268,7 @@ function SceneCanvas({
   }
 
   function beginMove(e: React.MouseEvent, shape: SceneShape) {
-    if (!onUpdateShape) return;
+    if (!onUpdateShape || activeTool !== "select") return;
     e.stopPropagation();
     onSelect?.(shape.id);
     const [wx, wy] = svgToWorld(e.clientX, e.clientY);
@@ -226,11 +282,7 @@ function SceneCanvas({
     movedRef.current = false;
   }
 
-  function beginResize(
-    e: React.MouseEvent,
-    shape: SceneShape,
-    handle: ResizeHandle,
-  ) {
+  function beginResize(e: React.MouseEvent, shape: SceneShape, handle: ResizeHandle) {
     if (!onUpdateShape) return;
     e.stopPropagation();
     const [wx, wy] = svgToWorld(e.clientX, e.clientY);
@@ -268,16 +320,23 @@ function SceneCanvas({
     dragRef.current = null;
   }
 
-  function handleSvgClick() {
+  function handleSvgClick(e: React.MouseEvent<SVGSVGElement>) {
     if (movedRef.current) {
       movedRef.current = false;
+      return;
+    }
+    if (activeTool !== "select" && onPlaceShape) {
+      const [wx, wy] = svgToWorld(e.clientX, e.clientY);
+      onPlaceShape(activeTool, wx, wy);
       return;
     }
     onSelect?.(null);
   }
 
+  const placementMode = activeTool !== "select";
+
   return (
-    <div className="overflow-hidden rounded-xl bg-zinc-900 ring-1 ring-zinc-800">
+    <div className="relative h-full overflow-hidden rounded-2xl bg-zinc-925 ring-1 ring-zinc-800">
       <svg
         ref={svgRef}
         viewBox={`0 0 ${W} ${H}`}
@@ -287,78 +346,38 @@ function SceneCanvas({
         onMouseUp={handleMouseUp}
         onMouseLeave={handleMouseUp}
         onClick={handleSvgClick}
+        style={{ cursor: placementMode ? "crosshair" : "default" }}
       >
-        {/* grid */}
-        {Array.from({ length: Math.floor(dx) + 1 }, (_, i) => {
-          const wx = Math.ceil(xmin) + i;
-          if (wx > xmax) return null;
-          return (
-            <line
-              key={`vg-${i}`}
-              x1={toX(wx)}
-              y1={0}
-              x2={toX(wx)}
-              y2={H}
-              stroke="#27272a"
-              strokeWidth="1"
-            />
-          );
-        })}
-        {Array.from({ length: Math.floor(dy) + 1 }, (_, i) => {
-          const wy = Math.ceil(ymin) + i;
-          if (wy > ymax) return null;
-          return (
-            <line
-              key={`hg-${i}`}
-              x1={0}
-              y1={toY(wy)}
-              x2={W}
-              y2={toY(wy)}
-              stroke="#27272a"
-              strokeWidth="1"
-            />
-          );
-        })}
-
-        {/* axes */}
-        {showXAxis && (
-          <line
-            x1={0}
-            y1={toY(0)}
-            x2={W}
-            y2={toY(0)}
-            stroke="#52525b"
-            strokeWidth="1.5"
-          />
-        )}
-        {showYAxis && (
-          <line
-            x1={toX(0)}
-            y1={0}
-            x2={toX(0)}
-            y2={H}
-            stroke="#52525b"
-            strokeWidth="1.5"
-          />
-        )}
+        <defs>
+          <pattern
+            id="scene-dots"
+            width="22"
+            height="22"
+            patternUnits="userSpaceOnUse"
+          >
+            <circle cx="11" cy="11" r="1.2" fill="#3f3f46" />
+          </pattern>
+        </defs>
+        <rect width={W} height={H} fill="#0f0f12" />
+        <rect width={W} height={H} fill="url(#scene-dots)" />
 
         {scene.shapes.map((s) =>
           renderShape(s, toX, toY, dx, {
             selectedId,
             clickedButtonId,
             onClick: onClickButton,
-            onMouseDown: onUpdateShape
+            onMouseDown: onUpdateShape && activeTool === "select"
               ? (e) => beginMove(e, s)
               : undefined,
           }),
         )}
 
-        {/* Resize handles for the selected shape */}
         {onUpdateShape &&
+          activeTool === "select" &&
           scene.shapes
             .filter((s) => s.id === selectedId)
             .map((s) =>
-              renderHandles(s, toX, toY, dx, (e, h) => beginResize(e, s, h)),
+              renderHandles(s, toX, toY, (e, h) => beginResize(e, s, h)),
             )}
       </svg>
     </div>
@@ -397,7 +416,6 @@ function resizePatch(
     return { r: round(r) };
   }
   if (s.kind === "rect" || s.kind === "button") {
-    // The corner opposite to the dragged handle stays fixed.
     const left = s.cx - s.w / 2;
     const right = s.cx + s.w / 2;
     const top = s.cy + s.h / 2;
@@ -430,10 +448,8 @@ function renderHandles(
   s: SceneShape,
   toX: (wx: number) => number,
   toY: (wy: number) => number,
-  dx: number,
   onMouseDown: (e: React.MouseEvent, h: ResizeHandle) => void,
 ): React.ReactNode {
-  const handleStyle = { cursor: "nwse-resize" } as React.CSSProperties;
   const dot = (x: number, y: number, h: ResizeHandle, cursor: string) => (
     <circle
       key={h}
@@ -477,8 +493,6 @@ function renderHandles(
       </g>
     );
   }
-  // point/text: just highlight, no handles
-  void handleStyle;
   return null;
 }
 
@@ -498,7 +512,10 @@ function renderShape(
   const isSelected = ctx.selectedId === s.id;
   const selectionStroke = isSelected ? "#22d3ee" : undefined;
 
-  const interact: { onMouseDown?: (e: React.MouseEvent<SVGGElement>) => void; style?: React.CSSProperties } = {
+  const interact: {
+    onMouseDown?: (e: React.MouseEvent<SVGGElement>) => void;
+    style?: React.CSSProperties;
+  } = {
     onMouseDown: ctx.onMouseDown,
     style: ctx.onMouseDown ? { cursor: "grab" } : undefined,
   };
@@ -763,6 +780,7 @@ export function SceneEditor({
   onChange: (next: Scene) => void;
 }) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [activeTool, setActiveTool] = useState<ActiveTool>("select");
   const [boundsOpen, setBoundsOpen] = useState(false);
 
   const selected = useMemo(
@@ -776,12 +794,6 @@ export function SceneEditor({
     }
   }, [scene.shapes, selectedId]);
 
-  function addShape(kind: SceneShape["kind"]) {
-    const s = defaultShape(kind);
-    onChange({ ...scene, shapes: [...scene.shapes, s] });
-    setSelectedId(s.id);
-  }
-
   function updateShape(id: string, patch: Partial<SceneShape>) {
     onChange({
       ...scene,
@@ -789,6 +801,13 @@ export function SceneEditor({
         s.id === id ? ({ ...s, ...patch } as SceneShape) : s,
       ),
     });
+  }
+
+  function placeShape(kind: SceneShape["kind"], wx: number, wy: number) {
+    const s = makeShape(kind, wx, wy);
+    onChange({ ...scene, shapes: [...scene.shapes, s] });
+    setSelectedId(s.id);
+    setActiveTool("select");
   }
 
   function removeShape(id: string) {
@@ -810,84 +829,276 @@ export function SceneEditor({
 
   return (
     <div className="overflow-hidden rounded-2xl bg-zinc-950 ring-1 ring-zinc-800">
-      <Toolbar onAdd={addShape} boundsOpen={boundsOpen} onToggleBounds={() => setBoundsOpen((v) => !v)} />
+      <div className="relative flex gap-3 p-3">
+        <Sidebar
+          activeTool={activeTool}
+          onSelectTool={(t) => {
+            setActiveTool(t);
+            if (t !== "select") setSelectedId(null);
+          }}
+          boundsOpen={boundsOpen}
+          onToggleBounds={() => setBoundsOpen((v) => !v)}
+        />
 
-      {boundsOpen && <ViewBoundsRow scene={scene} onChange={onChange} />}
-
-      <div className="grid gap-0 lg:grid-cols-[1fr_240px]">
-        <div className="p-3">
+        <div className="min-w-0 flex-1">
           <SceneCanvas
             scene={scene}
             selectedId={selectedId ?? undefined}
-            onSelect={setSelectedId}
+            activeTool={activeTool}
+            onSelect={(id) => {
+              if (activeTool !== "select") setActiveTool("select");
+              setSelectedId(id);
+            }}
             onUpdateShape={updateShape}
+            onPlaceShape={placeShape}
           />
         </div>
 
-        <PropertyPanel
-          selected={selected}
-          correctButtonId={scene.correctButtonId}
-          onUpdate={(patch) => selected && updateShape(selected.id, patch)}
-          onRemove={() => selected && removeShape(selected.id)}
-          onSetCorrect={(buttonId) =>
-            onChange({ ...scene, correctButtonId: buttonId })
-          }
-        />
+        {selected && (
+          <PropertyPanel
+            selected={selected}
+            correctButtonId={scene.correctButtonId}
+            onUpdate={(patch) => updateShape(selected.id, patch)}
+            onRemove={() => removeShape(selected.id)}
+            onSetCorrect={(buttonId) =>
+              onChange({ ...scene, correctButtonId: buttonId })
+            }
+          />
+        )}
       </div>
 
+      {boundsOpen && <ViewBoundsRow scene={scene} onChange={onChange} />}
       <HintRow scene={scene} onChange={onChange} />
     </div>
   );
 }
 
-function Toolbar({
-  onAdd,
+// ---------------- Sidebar ----------------
+
+const TOOL_COLORS = {
+  select: { idle: "text-violet-300", active: "bg-violet-500/15 text-violet-200" },
+  shapes: { idle: "text-zinc-300", active: "bg-zinc-700/40 text-zinc-100" },
+  point: { idle: "text-rose-300", active: "bg-rose-500/15 text-rose-200" },
+  circle: { idle: "text-emerald-300", active: "bg-emerald-500/15 text-emerald-200" },
+  rect: { idle: "text-indigo-300", active: "bg-indigo-500/15 text-indigo-200" },
+  line: { idle: "text-sky-300", active: "bg-sky-500/15 text-sky-200" },
+  text: { idle: "text-violet-300", active: "bg-violet-500/15 text-violet-200" },
+  button: { idle: "text-amber-300", active: "bg-amber-500/15 text-amber-200" },
+  canvas: { idle: "text-zinc-400", active: "bg-zinc-700/40 text-zinc-100" },
+};
+
+function Sidebar({
+  activeTool,
+  onSelectTool,
   boundsOpen,
   onToggleBounds,
 }: {
-  onAdd: (kind: SceneShape["kind"]) => void;
+  activeTool: ActiveTool;
+  onSelectTool: (t: ActiveTool) => void;
   boundsOpen: boolean;
   onToggleBounds: () => void;
 }) {
-  const items: { kind: SceneShape["kind"]; label: string }[] = [
-    { kind: "point", label: "Point" },
-    { kind: "line", label: "Line" },
-    { kind: "circle", label: "Circle" },
-    { kind: "rect", label: "Rectangle" },
-    { kind: "text", label: "Text" },
-    { kind: "button", label: "Button" },
-  ];
+  const [shapesOpen, setShapesOpen] = useState(false);
+  const flyoutRef = useRef<HTMLDivElement>(null);
+  const shapesAnchorRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    if (!shapesOpen) return;
+    function onDocClick(e: MouseEvent) {
+      const target = e.target as Node;
+      if (
+        flyoutRef.current?.contains(target) ||
+        shapesAnchorRef.current?.contains(target)
+      ) {
+        return;
+      }
+      setShapesOpen(false);
+    }
+    document.addEventListener("mousedown", onDocClick);
+    return () => document.removeEventListener("mousedown", onDocClick);
+  }, [shapesOpen]);
+
+  const shapeActive =
+    activeTool === "point" || activeTool === "circle" || activeTool === "rect";
+
   return (
-    <div className="flex items-center justify-between gap-3 border-b border-zinc-800 px-3 py-2">
-      <div className="flex items-center gap-1">
-        {items.map((item) => (
-          <button
-            key={item.kind}
-            type="button"
-            onClick={() => onAdd(item.kind)}
-            title={`Add ${item.label}`}
-            aria-label={`Add ${item.label}`}
-            className="flex h-9 w-9 items-center justify-center rounded-md text-zinc-300 transition hover:bg-zinc-800 hover:text-zinc-100"
-          >
-            {ICONS[item.kind]}
-          </button>
-        ))}
-      </div>
-      <button
-        type="button"
-        onClick={onToggleBounds}
-        className={
-          "rounded-md px-2.5 py-1 text-xs font-medium transition " +
-          (boundsOpen
-            ? "bg-zinc-800 text-zinc-100"
-            : "text-zinc-500 hover:bg-zinc-800 hover:text-zinc-200")
-        }
+    <div className="relative flex flex-col gap-1 rounded-2xl bg-zinc-900 p-2 ring-1 ring-zinc-800">
+      <ToolButton
+        label="Select"
+        active={activeTool === "select"}
+        tone={TOOL_COLORS.select}
+        onClick={() => onSelectTool("select")}
       >
-        Canvas
-      </button>
+        <CursorIcon />
+      </ToolButton>
+
+      <div className="relative">
+        <ToolButton
+          label="Shapes"
+          active={shapeActive || shapesOpen}
+          tone={TOOL_COLORS.shapes}
+          onClick={() => setShapesOpen((v) => !v)}
+          buttonRef={shapesAnchorRef}
+        >
+          <ShapesIcon />
+        </ToolButton>
+        {shapesOpen && (
+          <div
+            ref={flyoutRef}
+            className="absolute left-full top-0 z-20 ml-2 flex flex-col gap-1 rounded-2xl bg-zinc-900 p-2 shadow-2xl ring-1 ring-zinc-800"
+          >
+            <FlyoutItem
+              label="Point"
+              onClick={() => {
+                onSelectTool("point");
+                setShapesOpen(false);
+              }}
+              tone={TOOL_COLORS.point}
+              active={activeTool === "point"}
+            >
+              <PointIcon />
+            </FlyoutItem>
+            <FlyoutItem
+              label="Circle"
+              onClick={() => {
+                onSelectTool("circle");
+                setShapesOpen(false);
+              }}
+              tone={TOOL_COLORS.circle}
+              active={activeTool === "circle"}
+            >
+              <CircleIcon />
+            </FlyoutItem>
+            <FlyoutItem
+              label="Rectangle"
+              onClick={() => {
+                onSelectTool("rect");
+                setShapesOpen(false);
+              }}
+              tone={TOOL_COLORS.rect}
+              active={activeTool === "rect"}
+            >
+              <RectIcon />
+            </FlyoutItem>
+          </div>
+        )}
+      </div>
+
+      <ToolButton
+        label="Line"
+        active={activeTool === "line"}
+        tone={TOOL_COLORS.line}
+        onClick={() => onSelectTool("line")}
+      >
+        <LineIcon />
+      </ToolButton>
+
+      <ToolButton
+        label="Text"
+        active={activeTool === "text"}
+        tone={TOOL_COLORS.text}
+        onClick={() => onSelectTool("text")}
+      >
+        <TextIcon />
+      </ToolButton>
+
+      <ToolButton
+        label="Button"
+        active={activeTool === "button"}
+        tone={TOOL_COLORS.button}
+        onClick={() => onSelectTool("button")}
+      >
+        <ButtonIcon />
+      </ToolButton>
+
+      <div className="mt-1 border-t border-zinc-800 pt-1">
+        <ToolButton
+          label="Canvas"
+          active={boundsOpen}
+          tone={TOOL_COLORS.canvas}
+          onClick={onToggleBounds}
+        >
+          <svg
+            viewBox="0 0 24 24"
+            className="h-5 w-5"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+          >
+            <rect x="3" y="3" width="18" height="18" rx="2" />
+            <line x1="3" y1="9" x2="21" y2="9" />
+            <line x1="3" y1="15" x2="21" y2="15" />
+            <line x1="9" y1="3" x2="9" y2="21" />
+            <line x1="15" y1="3" x2="15" y2="21" />
+          </svg>
+        </ToolButton>
+      </div>
     </div>
   );
 }
+
+function ToolButton({
+  children,
+  label,
+  active,
+  tone,
+  onClick,
+  buttonRef,
+}: {
+  children: React.ReactNode;
+  label: string;
+  active: boolean;
+  tone: { idle: string; active: string };
+  onClick: () => void;
+  buttonRef?: React.RefObject<HTMLButtonElement | null>;
+}) {
+  return (
+    <button
+      ref={buttonRef}
+      type="button"
+      onClick={onClick}
+      title={label}
+      aria-label={label}
+      className={
+        "flex h-10 w-10 items-center justify-center rounded-xl transition " +
+        (active ? tone.active : `${tone.idle} hover:bg-zinc-800`)
+      }
+    >
+      {children}
+    </button>
+  );
+}
+
+function FlyoutItem({
+  children,
+  label,
+  active,
+  tone,
+  onClick,
+}: {
+  children: React.ReactNode;
+  label: string;
+  active: boolean;
+  tone: { idle: string; active: string };
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      title={label}
+      aria-label={label}
+      className={
+        "flex h-9 w-9 items-center justify-center rounded-lg transition " +
+        (active ? tone.active : `${tone.idle} hover:bg-zinc-800`)
+      }
+    >
+      {children}
+    </button>
+  );
+}
+
+// ---------------- Property panel ----------------
 
 function PropertyPanel({
   selected,
@@ -896,29 +1107,17 @@ function PropertyPanel({
   onRemove,
   onSetCorrect,
 }: {
-  selected: SceneShape | null;
+  selected: SceneShape;
   correctButtonId?: string;
   onUpdate: (patch: Partial<SceneShape>) => void;
   onRemove: () => void;
   onSetCorrect: (id: string | undefined) => void;
 }) {
-  if (!selected) {
-    return (
-      <div className="hidden border-l border-zinc-800 p-4 text-xs text-zinc-500 lg:block">
-        <p className="font-medium text-zinc-300">No selection</p>
-        <p className="mt-1">
-          Pick a tool above to add a shape, or click an existing shape to edit
-          it.
-        </p>
-      </div>
-    );
-  }
-
   const fieldClass =
     "w-full rounded-md bg-zinc-900 px-2 py-1 text-xs text-zinc-100 ring-1 ring-zinc-800 focus:outline-none focus:ring-2 focus:ring-cyan-400";
 
   return (
-    <div className="space-y-3 border-l border-zinc-800 p-4">
+    <div className="w-56 shrink-0 space-y-3 rounded-2xl bg-zinc-900 p-3 ring-1 ring-zinc-800">
       <div className="flex items-center justify-between">
         <p className="text-[11px] font-semibold uppercase tracking-wider text-zinc-400">
           {selected.kind}
@@ -1064,7 +1263,7 @@ function PropertyPanel({
             onChange={(v) => onUpdate({ buttonId: v })}
             className={fieldClass}
           />
-          <label className="flex items-center gap-2 rounded-md bg-zinc-900 px-2 py-1.5 text-xs text-zinc-300 ring-1 ring-zinc-800">
+          <label className="flex items-center gap-2 rounded-md bg-zinc-950 px-2 py-1.5 text-xs text-zinc-300 ring-1 ring-zinc-800">
             <input
               type="checkbox"
               checked={correctButtonId === selected.buttonId}
@@ -1184,7 +1383,7 @@ function ViewBoundsRow({
     onChange({ ...scene, view: { ...scene.view, ...patch } });
   }
   return (
-    <div className="grid grid-cols-4 gap-2 border-b border-zinc-800 bg-zinc-925 p-3">
+    <div className="grid grid-cols-4 gap-2 border-t border-zinc-800 px-3 py-3">
       <NumField
         label="X min"
         value={scene.view.xmin}
