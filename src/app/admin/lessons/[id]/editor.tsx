@@ -12,9 +12,6 @@ import {
   type QuestionBlock,
   type TextBlock,
 } from "@/lib/lesson-content";
-import { SAMPLE_SCROLLSCRIPT } from "@/lib/scrollscript";
-import ScrollScriptRunner from "@/components/scrollscript-runner";
-import ScrollScriptEditor from "@/components/scrollscript-editor";
 import {
   DEFAULT_SCENE,
   SceneEditor as VisualSceneEditor,
@@ -121,7 +118,8 @@ export default function LessonEditor({
         ? ({
             type: "interactive",
             prompt: "",
-            code: SAMPLE_SCROLLSCRIPT,
+            code: "",
+            scene: DEFAULT_SCENE,
           } as Block)
         : emptyBlock(type);
     setBlocks((bs) => [...bs, withKey(newBlock)]);
@@ -720,12 +718,6 @@ function InteractiveEditor({
   block: InteractiveBlock;
   onUpdate: (patch: Partial<InteractiveBlock>) => void;
 }) {
-  const [showHelp, setShowHelp] = useState(false);
-  // Default new blocks to Visual mode. Existing blocks with code-only stay in Code.
-  const [mode, setMode] = useState<"visual" | "code">(() =>
-    block.scene ? "visual" : block.code ? "code" : "visual",
-  );
-
   const scene: Scene = block.scene ?? DEFAULT_SCENE;
 
   return (
@@ -762,149 +754,20 @@ function InteractiveEditor({
         )}
       </div>
 
-      <div className="inline-flex items-center gap-1 rounded-full bg-zinc-900 p-1 ring-1 ring-zinc-800">
-        {(["visual", "code"] as const).map((m) => (
-          <button
-            key={m}
-            type="button"
-            onClick={() => setMode(m)}
-            className={
-              "rounded-full px-3 py-1 text-xs font-medium transition " +
-              (mode === m
-                ? "bg-zinc-800 text-zinc-100"
-                : "text-zinc-500 hover:text-zinc-200")
-            }
-          >
-            {m === "visual" ? "Visual" : "Code"}
-          </button>
-        ))}
+      <VisualSceneEditor
+        scene={scene}
+        onChange={(next) => onUpdate({ scene: next })}
+      />
+
+      <div>
+        <p className="mb-2 text-xs font-medium uppercase tracking-wider text-zinc-500">
+          Live preview
+        </p>
+        <div className="rounded-xl bg-zinc-900 p-4 ring-1 ring-zinc-800">
+          <SceneRunner scene={scene} />
+        </div>
       </div>
-
-      {mode === "visual" ? (
-        <>
-          <VisualSceneEditor
-            scene={scene}
-            onChange={(next) => onUpdate({ scene: next })}
-          />
-          <div>
-            <p className="mb-2 text-xs font-medium uppercase tracking-wider text-zinc-500">
-              Live preview
-            </p>
-            <div className="rounded-xl bg-zinc-900 p-4 ring-1 ring-zinc-800">
-              <SceneRunner scene={scene} />
-            </div>
-          </div>
-        </>
-      ) : (
-        <>
-          <div>
-            <div className="mb-2 flex items-center justify-between">
-              <p className="text-xs font-medium uppercase tracking-wider text-zinc-500">
-                ScrollScript code (advanced — for sliders, conditionals, etc.)
-              </p>
-              <button
-                type="button"
-                onClick={() => setShowHelp((v) => !v)}
-                className="text-xs font-medium text-cyan-300 hover:text-cyan-200"
-              >
-                {showHelp ? "Hide syntax" : "Show syntax"}
-              </button>
-            </div>
-            {showHelp && <SyntaxHelp />}
-            <div className="mt-2">
-              <ScrollScriptEditor
-                value={block.code}
-                onChange={(v) => onUpdate({ code: v })}
-                minRows={12}
-                label="interactive.script"
-              />
-            </div>
-          </div>
-          <div>
-            <p className="mb-2 text-xs font-medium uppercase tracking-wider text-zinc-500">
-              Live preview
-            </p>
-            <div className="rounded-xl bg-zinc-900 p-4 ring-1 ring-zinc-800">
-              <ScrollScriptRunner code={block.code} />
-            </div>
-          </div>
-        </>
-      )}
     </div>
   );
 }
 
-function SyntaxHelp() {
-  return (
-    <div className="rounded-lg bg-cyan-500/10 p-4 text-xs text-zinc-200 ring-1 ring-cyan-500/30">
-      <p className="font-semibold">
-        ScrollScript — one statement per line. Comments start with{" "}
-        <code>#</code>.
-      </p>
-      <p className="mt-1 text-zinc-400">
-        Shapes use named properties:{" "}
-        <code>cords(x, y)</code>, <code>dims(...)</code>,{" "}
-        <code>color(name)</code>, <code>label(&quot;text&quot;)</code>,{" "}
-        <code>type(static|button)</code>, <code>id(&quot;...&quot;)</code>,{" "}
-        <code>value(&quot;text&quot;)</code>. Lines use{" "}
-        <code>from(x, y) to(x, y)</code>.
-      </p>
-      <ul className="mt-2 space-y-1 font-mono">
-        <li>
-          <code>view xmin xmax ymin ymax</code>
-        </li>
-        <li>
-          <code>slider NAME min max default &quot;label&quot;</code>
-        </li>
-        <li>
-          <code>NAME = EXPRESSION</code> — just assign, no <code>let</code>
-        </li>
-        <li>
-          <code>point cords(x, y) [color(c)] [label(&quot;L&quot;)]</code>
-        </li>
-        <li>
-          <code>line from(x, y) to(x, y) [color(c)]</code>
-        </li>
-        <li>
-          <code>circle cords(cx, cy) dims(r) [color(c)] [label(&quot;L&quot;)]</code>
-        </li>
-        <li>
-          <code>rect cords(cx, cy) dims(w, h) [color(c)] [label(&quot;L&quot;)]</code>
-        </li>
-        <li>
-          <code>
-            rect cords(cx, cy) dims(w, h) type(button) id(&quot;x&quot;)
-            label(&quot;Click me&quot;)
-          </code>{" "}
-          — clickable, sets <code>clicked</code>
-        </li>
-        <li>
-          <code>text cords(x, y) value(&quot;text&quot;) [color(c)]</code>
-        </li>
-        <li>
-          <code>if cond ... elif cond ... else ... end</code> — blocks
-        </li>
-        <li>
-          <code>check EXPRESSION</code> — e.g.{" "}
-          <code>check clicked == &quot;yes&quot;</code>
-        </li>
-        <li>
-          <code>hint &quot;text shown when wrong&quot;</code>
-        </li>
-      </ul>
-      <p className="mt-3 font-semibold text-cyan-300">Math</p>
-      <p className="mt-1 text-zinc-400">
-        Operators <code>+ - * / ^</code>. Comparisons{" "}
-        <code>{"< > <= >= == !="}</code>. Logic <code>and or not</code>.
-        Constants <code>pi e</code>. Functions{" "}
-        <code>sin cos tan sqrt abs min max floor ceil round</code>. Wrap
-        computed coords in parens, e.g.{" "}
-        <code>point (x + 1) (y * 2)</code>.
-      </p>
-      <p className="mt-3 font-semibold text-cyan-300">Colors</p>
-      <p className="mt-1 text-zinc-400">
-        <code>slate emerald rose sky amber red blue green indigo violet gray</code>
-      </p>
-    </div>
-  );
-}
