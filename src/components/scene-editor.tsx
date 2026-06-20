@@ -264,6 +264,7 @@ function SceneCanvas({
   const movedRef = useRef(false);
   const [view, setView] = useState({ zoom: 1, panX: 0, panY: 0 });
   const [, forceTick] = useState(0);
+  const [isDragging, setIsDragging] = useState(false);
 
   const editable = !!onUpdateShape;
 
@@ -375,7 +376,7 @@ function SceneCanvas({
   // Compute floating action menu position (above selected shape's top edge)
   const selectedShape = scene.shapes.find((s) => s.id === selectedId);
   const showFloatingMenu =
-    editable && selectedShape && activeTool === "select";
+    editable && selectedShape && activeTool === "select" && !isDragging;
   let floatingPos: { x: number; y: number } | null = null;
   if (showFloatingMenu && selectedShape) {
     const anchor = shapeTopAnchor(selectedShape);
@@ -395,6 +396,7 @@ function SceneCanvas({
       startWY: wy,
     };
     movedRef.current = false;
+    setIsDragging(true);
   }
 
   function beginResize(e: React.MouseEvent, shape: SceneShape, handle: ResizeHandle) {
@@ -410,6 +412,7 @@ function SceneCanvas({
       startWY: wy,
     };
     movedRef.current = false;
+    setIsDragging(true);
   }
 
   function handleMouseMove(e: React.MouseEvent<SVGSVGElement>) {
@@ -433,6 +436,7 @@ function SceneCanvas({
 
   function handleMouseUp() {
     dragRef.current = null;
+    if (isDragging) setIsDragging(false);
   }
 
   function handleSvgClick(e: React.MouseEvent<SVGSVGElement>) {
@@ -527,7 +531,13 @@ function SceneCanvas({
         onMouseUp={handleMouseUp}
         onMouseLeave={handleMouseUp}
         onClick={handleSvgClick}
-        style={{ cursor: placementMode ? "crosshair" : "default" }}
+        style={{
+          cursor: placementMode
+            ? "crosshair"
+            : isDragging
+              ? "grabbing"
+              : "default",
+        }}
       >
         <defs>
           <pattern

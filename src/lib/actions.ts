@@ -168,23 +168,32 @@ export async function createLessonAction(
   if (title.length > 200) return { error: "Title is too long." };
 
   const emptyContent = JSON.stringify({ blocks: [] });
-  const inserted = await dbGet<{ id: number }>(
-    "INSERT INTO lessons (title, description, content, grade, subject, category_id, created_by, created_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id",
-    [
-      title,
-      description,
-      emptyContent,
-      grade,
-      subject,
-      categoryId,
-      session.userId,
-      Date.now(),
-    ],
-  );
+  let inserted: { id: number } | undefined;
+  try {
+    inserted = await dbGet<{ id: number }>(
+      "INSERT INTO lessons (title, description, content, grade, subject, category_id, created_by, created_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id",
+      [
+        title,
+        description,
+        emptyContent,
+        grade,
+        subject,
+        categoryId,
+        session.userId,
+        Date.now(),
+      ],
+    );
+  } catch (e) {
+    return {
+      error: `Couldn't save lesson: ${e instanceof Error ? e.message : String(e)}`,
+    };
+  }
+  if (!inserted) return { error: "Couldn't save lesson (no row returned)." };
 
   revalidatePath("/admin");
+  revalidatePath("/admin/new");
   revalidatePath("/dashboard");
-  redirect(`/admin/lessons/${inserted!.id}`);
+  redirect(`/admin/lessons/${inserted.id}`);
 }
 
 export async function saveLessonAction(
@@ -229,10 +238,16 @@ export async function saveLessonAction(
     return { error: "Invalid lesson content." };
   }
 
-  await dbExec(
-    "UPDATE lessons SET title = $1, description = $2, subject = $3, grade = $4, category_id = $5, content = $6 WHERE id = $7",
-    [title, description, subject, grade, categoryId, content, id],
-  );
+  try {
+    await dbExec(
+      "UPDATE lessons SET title = $1, description = $2, subject = $3, grade = $4, category_id = $5, content = $6 WHERE id = $7",
+      [title, description, subject, grade, categoryId, content, id],
+    );
+  } catch (e) {
+    return {
+      error: `Couldn't save lesson: ${e instanceof Error ? e.message : String(e)}`,
+    };
+  }
 
   revalidatePath("/admin");
   revalidatePath(`/admin/lessons/${id}`);

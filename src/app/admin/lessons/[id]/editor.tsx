@@ -173,6 +173,12 @@ export default function LessonEditor({
               </span>
             )}
             <Link
+              href="/admin/new"
+              className="rounded-lg px-3 py-1.5 text-sm font-medium text-zinc-300 hover:bg-zinc-900 hover:text-zinc-100"
+            >
+              + New lesson
+            </Link>
+            <Link
               href={`/lessons/${lessonId}`}
               target="_blank"
               className="rounded-lg px-3 py-1.5 text-sm font-medium text-zinc-300 hover:bg-zinc-900 hover:text-zinc-100"
