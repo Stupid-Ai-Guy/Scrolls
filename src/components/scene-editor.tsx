@@ -234,7 +234,17 @@ type RendererProps = {
   onUpdateShape?: (id: string, patch: Partial<SceneShape>) => void;
   onPlaceShape?: (kind: SceneShape["kind"], wx: number, wy: number) => void;
   onClickButton?: (buttonId: string) => void;
+  onDuplicateShape?: (id: string) => void;
+  onRemoveShape?: (id: string) => void;
 };
+
+function shapeTopAnchor(s: SceneShape): { x: number; y: number } {
+  if (s.kind === "point" || s.kind === "text") return { x: s.x, y: s.y };
+  if (s.kind === "line")
+    return { x: (s.x1 + s.x2) / 2, y: Math.max(s.y1, s.y2) };
+  if (s.kind === "circle") return { x: s.cx, y: s.cy + s.r };
+  return { x: s.cx, y: s.cy + s.h / 2 };
+}
 
 function SceneCanvas({
   scene,
@@ -245,13 +255,27 @@ function SceneCanvas({
   onUpdateShape,
   onPlaceShape,
   onClickButton,
+  onDuplicateShape,
+  onRemoveShape,
 }: RendererProps) {
+  const containerRef = useRef<HTMLDivElement>(null);
   const svgRef = useRef<SVGSVGElement>(null);
   const dragRef = useRef<DragState | null>(null);
   const movedRef = useRef(false);
   const [view, setView] = useState({ zoom: 1, panX: 0, panY: 0 });
+  const [, forceTick] = useState(0);
 
   const editable = !!onUpdateShape;
+
+  // Trigger a re-render once refs are populated, and on container resize, so
+  // the floating action menu's pixel position stays accurate.
+  useEffect(() => {
+    forceTick((t) => t + 1);
+    if (!containerRef.current) return;
+    const observer = new ResizeObserver(() => forceTick((t) => t + 1));
+    observer.observe(containerRef.current);
+    return () => observer.disconnect();
+  }, []);
 
   // Non-passive wheel listener so we can preventDefault and intercept the page
   // scroll. Only attached in editor mode.
@@ -329,6 +353,35 @@ function SceneCanvas({
     setView({ zoom: 1, panX: 0, panY: 0 });
   }
 
+  function worldToContainerPx(
+    wx: number,
+    wy: number,
+  ): { x: number; y: number } | null {
+    const svg = svgRef.current;
+    const container = containerRef.current;
+    if (!svg || !container) return null;
+    const svgRect = svg.getBoundingClientRect();
+    const containerRect = container.getBoundingClientRect();
+    const sx = toX(wx);
+    const sy = toY(wy);
+    const fx = (sx - view.panX) / vbW;
+    const fy = (sy - view.panY) / vbH;
+    return {
+      x: svgRect.left - containerRect.left + fx * svgRect.width,
+      y: svgRect.top - containerRect.top + fy * svgRect.height,
+    };
+  }
+
+  // Compute floating action menu position (above selected shape's top edge)
+  const selectedShape = scene.shapes.find((s) => s.id === selectedId);
+  const showFloatingMenu =
+    editable && selectedShape && activeTool === "select";
+  let floatingPos: { x: number; y: number } | null = null;
+  if (showFloatingMenu && selectedShape) {
+    const anchor = shapeTopAnchor(selectedShape);
+    floatingPos = worldToContainerPx(anchor.x, anchor.y);
+  }
+
   function beginMove(e: React.MouseEvent, shape: SceneShape) {
     if (!onUpdateShape || activeTool !== "select") return;
     e.stopPropagation();
@@ -400,7 +453,7 @@ function SceneCanvas({
   const viewIsDefault = view.zoom === 1 && view.panX === 0 && view.panY === 0;
 
   return (
-    <div className="relative overflow-hidden">
+    <div ref={containerRef} className="relative overflow-hidden">
       {editable && !viewIsDefault && (
         <button
           type="button"
@@ -410,6 +463,60 @@ function SceneCanvas({
         >
           {Math.round(view.zoom * 100)}% · Reset
         </button>
+      )}
+
+      {showFloatingMenu && floatingPos && (
+        <div
+          className="pointer-events-none absolute z-30"
+          style={{
+            left: floatingPos.x,
+            top: floatingPos.y - 14,
+            transform: "translate(-50%, -100%)",
+          }}
+        >
+          <div className="pointer-events-auto flex items-center gap-0.5 rounded-full bg-zinc-900/95 p-1 shadow-2xl shadow-black/60 ring-1 ring-white/10 backdrop-blur">
+            <button
+              type="button"
+              onClick={() => selectedShape && onDuplicateShape?.(selectedShape.id)}
+              title="Duplicate"
+              aria-label="Duplicate"
+              className="flex h-7 w-7 items-center justify-center rounded-full text-zinc-300 transition hover:bg-zinc-800 hover:text-zinc-100"
+            >
+              <svg
+                viewBox="0 0 16 16"
+                className="h-3.5 w-3.5"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.6"
+                strokeLinejoin="round"
+              >
+                <rect x="5.5" y="5.5" width="8.5" height="8.5" rx="1.5" />
+                <path d="M10.5 5.5V3.5a1.5 1.5 0 0 0-1.5-1.5H3.5A1.5 1.5 0 0 0 2 3.5v5.5A1.5 1.5 0 0 0 3.5 10.5h2" />
+              </svg>
+            </button>
+            <button
+              type="button"
+              onClick={() => selectedShape && onRemoveShape?.(selectedShape.id)}
+              title="Delete"
+              aria-label="Delete"
+              className="flex h-7 w-7 items-center justify-center rounded-full text-zinc-300 transition hover:bg-rose-500/15 hover:text-rose-300"
+            >
+              <svg
+                viewBox="0 0 16 16"
+                className="h-3.5 w-3.5"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.6"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <path d="M3 4.5h10" />
+                <path d="M5.5 4.5V3a1 1 0 0 1 1-1h3a1 1 0 0 1 1 1v1.5" />
+                <path d="M4.5 4.5l1 9a1 1 0 0 0 1 1h3a1 1 0 0 0 1-1l1-9" />
+              </svg>
+            </button>
+          </div>
+        </div>
       )}
       <svg
         ref={svgRef}
@@ -531,17 +638,19 @@ function renderHandles(
   onMouseDown: (e: React.MouseEvent, h: ResizeHandle) => void,
 ): React.ReactNode {
   const dot = (x: number, y: number, h: ResizeHandle, cursor: string) => (
-    <circle
-      key={h}
-      cx={x}
-      cy={y}
-      r="5"
-      fill="#22d3ee"
-      stroke="#0a0a0a"
-      strokeWidth="1.5"
-      style={{ cursor }}
-      onMouseDown={(e) => onMouseDown(e, h)}
-    />
+    <g key={h} style={{ cursor }} onMouseDown={(e) => onMouseDown(e, h)}>
+      {/* outer subtle shadow ring */}
+      <circle cx={x} cy={y} r="7.5" fill="#0a0a0c" opacity="0.5" />
+      {/* main handle - white fill, cyan border */}
+      <circle
+        cx={x}
+        cy={y}
+        r="6"
+        fill="#ffffff"
+        stroke="#22d3ee"
+        strokeWidth="2"
+      />
+    </g>
   );
 
   if (s.kind === "line") {
@@ -874,6 +983,28 @@ export function SceneEditor({
     }
   }, [scene.shapes, selectedId]);
 
+  // Delete / Backspace removes the selected shape (unless typing in a field).
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (!selectedId) return;
+      if (e.key !== "Delete" && e.key !== "Backspace") return;
+      const target = e.target as HTMLElement | null;
+      if (
+        target &&
+        (target.tagName === "INPUT" ||
+          target.tagName === "TEXTAREA" ||
+          target.isContentEditable)
+      ) {
+        return;
+      }
+      e.preventDefault();
+      removeShape(selectedId);
+    }
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedId, scene.shapes]);
+
   function updateShape(id: string, patch: Partial<SceneShape>) {
     onChange({
       ...scene,
@@ -888,6 +1019,48 @@ export function SceneEditor({
     onChange({ ...scene, shapes: [...scene.shapes, s] });
     setSelectedId(s.id);
     setActiveTool("select");
+  }
+
+  function duplicateShape(id: string) {
+    const shape = scene.shapes.find((s) => s.id === id);
+    if (!shape) return;
+    const newId = uid();
+    const offset = 0.6;
+    let copy: SceneShape;
+    if (shape.kind === "point" || shape.kind === "text") {
+      copy = {
+        ...shape,
+        id: newId,
+        x: round(shape.x + offset),
+        y: round(shape.y - offset),
+      };
+    } else if (shape.kind === "line") {
+      copy = {
+        ...shape,
+        id: newId,
+        x1: round(shape.x1 + offset),
+        y1: round(shape.y1 - offset),
+        x2: round(shape.x2 + offset),
+        y2: round(shape.y2 - offset),
+      };
+    } else if (shape.kind === "button") {
+      copy = {
+        ...shape,
+        id: newId,
+        cx: round(shape.cx + offset),
+        cy: round(shape.cy - offset),
+        buttonId: `btn-${newId}`,
+      };
+    } else {
+      copy = {
+        ...shape,
+        id: newId,
+        cx: round(shape.cx + offset),
+        cy: round(shape.cy - offset),
+      };
+    }
+    onChange({ ...scene, shapes: [...scene.shapes, copy] });
+    setSelectedId(newId);
   }
 
   function removeShape(id: string) {
@@ -946,6 +1119,8 @@ export function SceneEditor({
           }}
           onUpdateShape={updateShape}
           onPlaceShape={placeShape}
+          onDuplicateShape={duplicateShape}
+          onRemoveShape={removeShape}
         />
       </div>
 
