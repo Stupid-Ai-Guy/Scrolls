@@ -2,12 +2,21 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { getSession } from "@/lib/session";
 import { dbAll, type CategoryRow } from "@/lib/db";
+import { normalizeSubject, parseGrade } from "@/lib/curriculum";
 import NewLessonForm from "./new-lesson-form";
 
-export default async function NewLessonPage() {
+export default async function NewLessonPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ subject?: string; grade?: string }>;
+}) {
   const session = await getSession();
   if (!session) redirect("/login");
   if (session.role !== "admin") redirect("/dashboard");
+
+  const params = await searchParams;
+  const initialSubject = normalizeSubject(params.subject);
+  const initialGrade = parseGrade(params.grade);
 
   const categories = await dbAll<CategoryRow>(
     "SELECT id, subject, grade, name, position, created_at FROM categories ORDER BY subject, grade, position",
@@ -46,6 +55,8 @@ export default async function NewLessonPage() {
 
         <div className="mt-8 rounded-2xl bg-zinc-950 p-7 ring-1 ring-zinc-800">
           <NewLessonForm
+            initialSubject={initialSubject}
+            initialGrade={initialGrade}
             categories={categories.map((c) => ({
               id: c.id,
               subject: c.subject,

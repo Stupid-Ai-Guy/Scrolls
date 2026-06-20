@@ -15,17 +15,25 @@ type CategoryOption = {
 const fieldClass =
   "mt-1 w-full rounded-lg bg-zinc-900 px-3 py-2 text-sm text-zinc-100 ring-1 ring-zinc-800 transition placeholder:text-zinc-600 focus:outline-none focus:ring-2 focus:ring-cyan-400";
 
+function gradeToString(g: number): string {
+  return g === 0 ? "K" : String(g);
+}
+
 export default function NewLessonForm({
   categories,
+  initialSubject = "math",
+  initialGrade = 1,
 }: {
   categories: CategoryOption[];
+  initialSubject?: string;
+  initialGrade?: number;
 }) {
   const [state, formAction, pending] = useActionState(
     createLessonAction,
     initial,
   );
-  const [subject, setSubject] = useState("math");
-  const [grade, setGrade] = useState("1");
+  const [subject, setSubject] = useState(initialSubject);
+  const [grade, setGrade] = useState(gradeToString(initialGrade));
   const [categoryId, setCategoryId] = useState("");
 
   const filtered = categories.filter(
