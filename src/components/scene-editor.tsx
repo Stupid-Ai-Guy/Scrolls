@@ -243,6 +243,10 @@ type ResizeHandle =
   | "tr"
   | "bl"
   | "br"
+  | "t"
+  | "r"
+  | "b"
+  | "l"
   | "end1"
   | "end2"
   | "radius"
@@ -385,6 +389,10 @@ function SceneCanvas({
   const svgRef = useRef<SVGSVGElement>(null);
   const dragRef = useRef<DragState | null>(null);
   const movedRef = useRef(false);
+  // Set by beginMove / beginResize so the click event that bubbles to the
+  // SVG after a shape/handle mousedown doesn't run the empty-canvas
+  // deselect logic.
+  const clickedInteractiveRef = useRef(false);
   const [view, setView] = useState({ zoom: 1, panX: 0, panY: 0 });
   const [, forceTick] = useState(0);
   const [isDragging, setIsDragging] = useState(false);
@@ -532,6 +540,7 @@ function SceneCanvas({
   function beginMove(e: React.MouseEvent, shape: SceneShape) {
     if (!onUpdateShape || activeTool !== "select" || spacePan) return;
     e.stopPropagation();
+    clickedInteractiveRef.current = true;
 
     if (e.shiftKey) {
       // Toggle this shape in/out of the multi-selection; do not start a drag.
@@ -571,6 +580,7 @@ function SceneCanvas({
   function beginResize(e: React.MouseEvent, shape: SceneShape, handle: ResizeHandle) {
     if (!onUpdateShape) return;
     e.stopPropagation();
+    clickedInteractiveRef.current = true;
     onBeginEdit?.();
     const [wx, wy] = svgToWorld(e.clientX, e.clientY);
     dragRef.current = {
@@ -662,6 +672,12 @@ function SceneCanvas({
   function handleSvgClick(e: React.MouseEvent<SVGSVGElement>) {
     if (movedRef.current) {
       movedRef.current = false;
+      return;
+    }
+    if (clickedInteractiveRef.current) {
+      // Click was on a shape or resize handle; beginMove/beginResize already
+      // updated selection. Don't run the empty-canvas deselect.
+      clickedInteractiveRef.current = false;
       return;
     }
     if (spacePan) return;
@@ -1001,6 +1017,30 @@ function resizePatch(
     const right = s.cx + s.w / 2;
     const top = s.cy + s.h / 2;
     const bottom = s.cy - s.h / 2;
+
+    // Edge handles: resize one dimension, opposite edge stays fixed.
+    if (handle === "t") {
+      const nh = Math.max(0.4, Math.abs(wy - bottom));
+      const ncy = (wy + bottom) / 2;
+      return { cy: round(ncy), h: round(nh) };
+    }
+    if (handle === "b") {
+      const nh = Math.max(0.4, Math.abs(top - wy));
+      const ncy = (top + wy) / 2;
+      return { cy: round(ncy), h: round(nh) };
+    }
+    if (handle === "l") {
+      const nw = Math.max(0.4, Math.abs(right - wx));
+      const ncx = (right + wx) / 2;
+      return { cx: round(ncx), w: round(nw) };
+    }
+    if (handle === "r") {
+      const nw = Math.max(0.4, Math.abs(wx - left));
+      const ncx = (wx + left) / 2;
+      return { cx: round(ncx), w: round(nw) };
+    }
+
+    // Corner handles: resize both dimensions, opposite corner fixed.
     let fixedX = 0;
     let fixedY = 0;
     if (handle === "tl") {
@@ -1033,13 +1073,15 @@ function renderHandles(
 ): React.ReactNode {
   const dot = (x: number, y: number, h: ResizeHandle, cursor: string) => (
     <g key={h} style={{ cursor }} onMouseDown={(e) => onMouseDown(e, h)}>
+      {/* fat invisible hit area so the handle is easy to grab */}
+      <circle cx={x} cy={y} r="14" fill="transparent" />
       {/* outer subtle shadow ring */}
-      <circle cx={x} cy={y} r="7.5" fill="#0a0a0c" opacity="0.5" />
+      <circle cx={x} cy={y} r="8.5" fill="#0a0a0c" opacity="0.55" />
       {/* main handle - white fill, cyan border */}
       <circle
         cx={x}
         cy={y}
-        r="6"
+        r="7"
         fill="#ffffff"
         stroke="#22d3ee"
         strokeWidth="2"
@@ -1079,6 +1121,12 @@ function renderHandles(
     const bottom = s.cy - s.h / 2;
     return (
       <g key={`${s.id}-handles`}>
+        {/* edge handles: resize one dimension */}
+        {dot(toX(s.cx), toY(top), "t", "ns-resize")}
+        {dot(toX(s.cx), toY(bottom), "b", "ns-resize")}
+        {dot(toX(left), toY(s.cy), "l", "ew-resize")}
+        {dot(toX(right), toY(s.cy), "r", "ew-resize")}
+        {/* corner handles: resize both */}
         {dot(toX(left), toY(top), "tl", "nwse-resize")}
         {dot(toX(right), toY(top), "tr", "nesw-resize")}
         {dot(toX(left), toY(bottom), "bl", "nesw-resize")}
@@ -1184,8 +1232,11 @@ function renderShape(
     const h = (s.h / dx) * W;
     const fillColor = s.filled ? color : "none";
     const labelColor = s.filled ? "#0a0a0a" : color;
-    const showConnPts = ctx.showConnectionPoints || isSelected;
-    const connOpacity = isSelected ? 0.9 : 0.35;
+    // When the rect is selected, renderHandles draws interactive edge dots
+    // on the midpoints already, so suppress the static connection-point
+    // dots here to avoid double rendering.
+    const showConnPts = ctx.showConnectionPoints && !isSelected;
+    const connOpacity = 0.45;
     return (
       <g key={s.id} {...interact}>
         <rect
