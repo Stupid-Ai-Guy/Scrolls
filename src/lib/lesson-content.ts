@@ -39,12 +39,19 @@ export type SceneShape =
     }
   | {
       id: string;
+      kind: "polyline";
+      vertices: { x: number; y: number }[];
+      color: string;
+    }
+  | {
+      id: string;
       kind: "circle";
       cx: number;
       cy: number;
       r: number;
       color: string;
       label?: string;
+      filled?: boolean;
     }
   | {
       id: string;
@@ -55,6 +62,7 @@ export type SceneShape =
       h: number;
       color: string;
       label?: string;
+      filled?: boolean;
     }
   | {
       id: string;

@@ -49,6 +49,17 @@ function makeShape(kind: SceneShape["kind"], wx: number, wy: number): SceneShape
         y2: round(wy),
         color: "sky",
       };
+    case "polyline":
+      return {
+        id,
+        kind,
+        vertices: [
+          { x: round(wx - 2), y: round(wy) },
+          { x: round(wx), y: round(wy) },
+          { x: round(wx), y: round(wy + 2) },
+        ],
+        color: "sky",
+      };
     case "circle":
       return {
         id,
@@ -137,6 +148,25 @@ function LineIcon() {
   );
 }
 
+function PolylineIcon() {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      className="h-5 w-5"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <polyline points="4,20 12,8 20,16" />
+      <circle cx="4" cy="20" r="1.5" fill="currentColor" stroke="none" />
+      <circle cx="12" cy="8" r="1.5" fill="currentColor" stroke="none" />
+      <circle cx="20" cy="16" r="1.5" fill="currentColor" stroke="none" />
+    </svg>
+  );
+}
+
 function TextIcon() {
   return (
     <svg viewBox="0 0 24 24" className="h-5 w-5" fill="currentColor">
@@ -208,10 +238,26 @@ function RectIcon() {
 
 // ---------------- Drag types ----------------
 
-type ResizeHandle = "tl" | "tr" | "bl" | "br" | "end1" | "end2" | "radius";
+type ResizeHandle =
+  | "tl"
+  | "tr"
+  | "bl"
+  | "br"
+  | "end1"
+  | "end2"
+  | "radius"
+  | "v0"
+  | "v1"
+  | "v2";
 
 type DragState =
-  | { type: "move"; shapeId: string; original: SceneShape; startWX: number; startWY: number }
+  | {
+      type: "move";
+      shapeId: string;
+      originals: { id: string; shape: SceneShape }[];
+      startWX: number;
+      startWY: number;
+    }
   | {
       type: "resize";
       shapeId: string;
@@ -219,6 +265,14 @@ type DragState =
       handle: ResizeHandle;
       startWX: number;
       startWY: number;
+    }
+  | {
+      type: "marquee";
+      startWX: number;
+      startWY: number;
+      currentWX: number;
+      currentWY: number;
+      shiftKey: boolean;
     };
 
 // ---------------- Canvas ----------------
@@ -228,11 +282,16 @@ type ActiveTool = "select" | SceneShape["kind"];
 type RendererProps = {
   scene: Scene;
   selectedId?: string;
+  selectedIds?: string[];
   clickedButtonId?: string;
   activeTool?: ActiveTool;
   spacePan?: boolean;
-  onSelect?: (id: string | null) => void;
+  onSelect?: (id: string | null, opts?: { additive?: boolean }) => void;
+  onSelectMany?: (ids: string[]) => void;
   onUpdateShape?: (id: string, patch: Partial<SceneShape>) => void;
+  onUpdateShapes?: (
+    updates: { id: string; patch: Partial<SceneShape> }[],
+  ) => void;
   onPlaceShape?: (kind: SceneShape["kind"], wx: number, wy: number) => void;
   onClickButton?: (buttonId: string) => void;
   onDuplicateShape?: (id: string) => void;
@@ -248,18 +307,69 @@ function shapeTopAnchor(s: SceneShape): { x: number; y: number } {
   if (s.kind === "point" || s.kind === "text") return { x: s.x, y: s.y };
   if (s.kind === "line")
     return { x: (s.x1 + s.x2) / 2, y: Math.max(s.y1, s.y2) };
+  if (s.kind === "polyline") {
+    const xs = s.vertices.map((v) => v.x);
+    const ys = s.vertices.map((v) => v.y);
+    return { x: (Math.min(...xs) + Math.max(...xs)) / 2, y: Math.max(...ys) };
+  }
   if (s.kind === "circle") return { x: s.cx, y: s.cy + s.r };
   return { x: s.cx, y: s.cy + s.h / 2 };
+}
+
+function shapeBBox(s: SceneShape): {
+  minX: number;
+  minY: number;
+  maxX: number;
+  maxY: number;
+} {
+  if (s.kind === "point" || s.kind === "text") {
+    return { minX: s.x, minY: s.y, maxX: s.x, maxY: s.y };
+  }
+  if (s.kind === "line") {
+    return {
+      minX: Math.min(s.x1, s.x2),
+      minY: Math.min(s.y1, s.y2),
+      maxX: Math.max(s.x1, s.x2),
+      maxY: Math.max(s.y1, s.y2),
+    };
+  }
+  if (s.kind === "polyline") {
+    const xs = s.vertices.map((v) => v.x);
+    const ys = s.vertices.map((v) => v.y);
+    return {
+      minX: Math.min(...xs),
+      minY: Math.min(...ys),
+      maxX: Math.max(...xs),
+      maxY: Math.max(...ys),
+    };
+  }
+  if (s.kind === "circle") {
+    return {
+      minX: s.cx - s.r,
+      minY: s.cy - s.r,
+      maxX: s.cx + s.r,
+      maxY: s.cy + s.r,
+    };
+  }
+  return {
+    minX: s.cx - s.w / 2,
+    minY: s.cy - s.h / 2,
+    maxX: s.cx + s.w / 2,
+    maxY: s.cy + s.h / 2,
+  };
 }
 
 function SceneCanvas({
   scene,
   selectedId,
+  selectedIds,
   clickedButtonId,
   activeTool = "select",
   spacePan = false,
   onSelect,
+  onSelectMany,
   onUpdateShape,
+  onUpdateShapes,
   onPlaceShape,
   onClickButton,
   onDuplicateShape,
@@ -267,6 +377,10 @@ function SceneCanvas({
   onBeginEdit,
   onReorderShape,
 }: RendererProps) {
+  const selectedSet = useMemo(
+    () => new Set(selectedIds ?? (selectedId ? [selectedId] : [])),
+    [selectedIds, selectedId],
+  );
   const containerRef = useRef<HTMLDivElement>(null);
   const svgRef = useRef<SVGSVGElement>(null);
   const dragRef = useRef<DragState | null>(null);
@@ -402,8 +516,13 @@ function SceneCanvas({
 
   // Compute floating action menu position (above selected shape's top edge)
   const selectedShape = scene.shapes.find((s) => s.id === selectedId);
+  const singleSelected = selectedSet.size === 1;
   const showFloatingMenu =
-    editable && selectedShape && activeTool === "select" && !isDragging;
+    editable &&
+    selectedShape &&
+    singleSelected &&
+    activeTool === "select" &&
+    !isDragging;
   let floatingPos: { x: number; y: number } | null = null;
   if (showFloatingMenu && selectedShape) {
     const anchor = shapeTopAnchor(selectedShape);
@@ -413,13 +532,35 @@ function SceneCanvas({
   function beginMove(e: React.MouseEvent, shape: SceneShape) {
     if (!onUpdateShape || activeTool !== "select" || spacePan) return;
     e.stopPropagation();
-    onSelect?.(shape.id);
+
+    if (e.shiftKey) {
+      // Toggle this shape in/out of the multi-selection; do not start a drag.
+      onSelect?.(shape.id, { additive: true });
+      return;
+    }
+
+    const wasSelected = selectedSet.has(shape.id);
+    if (!wasSelected) {
+      onSelect?.(shape.id);
+    }
     onBeginEdit?.();
     const [wx, wy] = svgToWorld(e.clientX, e.clientY);
+
+    // Drag set: if the clicked shape was already part of a multi-selection,
+    // drag the whole group; otherwise drag just this shape.
+    const dragIds =
+      wasSelected && selectedSet.size > 1
+        ? Array.from(selectedSet)
+        : [shape.id];
+    const originals = dragIds
+      .map((id) => scene.shapes.find((s) => s.id === id))
+      .filter((s): s is SceneShape => !!s)
+      .map((s) => ({ id: s.id, shape: s }));
+
     dragRef.current = {
       type: "move",
       shapeId: shape.id,
-      original: shape,
+      originals,
       startWX: wx,
       startWY: wy,
     };
@@ -446,16 +587,39 @@ function SceneCanvas({
 
   function handleMouseMove(e: React.MouseEvent<SVGSVGElement>) {
     const d = dragRef.current;
-    if (!d || !onUpdateShape) return;
+    if (!d) return;
     const [wx, wy] = svgToWorld(e.clientX, e.clientY);
+
+    if (d.type === "marquee") {
+      if (
+        Math.abs(wx - d.currentWX) < 0.01 &&
+        Math.abs(wy - d.currentWY) < 0.01
+      ) {
+        return;
+      }
+      d.currentWX = wx;
+      d.currentWY = wy;
+      movedRef.current = true;
+      forceTick((t) => t + 1);
+      return;
+    }
+    if (!onUpdateShape) return;
 
     if (d.type === "move") {
       const dxw = wx - d.startWX;
       const dyw = wy - d.startWY;
       if (Math.abs(dxw) < 0.01 && Math.abs(dyw) < 0.01) return;
       movedRef.current = true;
-      const patch = movePatch(d.original, dxw, dyw);
-      onUpdateShape(d.shapeId, patch);
+      if (d.originals.length > 1 && onUpdateShapes) {
+        const updates = d.originals.map(({ id, shape }) => ({
+          id,
+          patch: movePatch(shape, dxw, dyw),
+        }));
+        onUpdateShapes(updates);
+      } else {
+        const o = d.originals[0];
+        if (o) onUpdateShape(o.id, movePatch(o.shape, dxw, dyw));
+      }
     } else {
       movedRef.current = true;
       const patch = resizePatch(d.original, d.handle, wx, wy);
@@ -464,6 +628,33 @@ function SceneCanvas({
   }
 
   function handleMouseUp() {
+    const d = dragRef.current;
+    if (d?.type === "marquee") {
+      if (movedRef.current) {
+        const minX = Math.min(d.startWX, d.currentWX);
+        const maxX = Math.max(d.startWX, d.currentWX);
+        const minY = Math.min(d.startWY, d.currentWY);
+        const maxY = Math.max(d.startWY, d.currentWY);
+        const ids = scene.shapes
+          .filter((s) => {
+            const b = shapeBBox(s);
+            return (
+              b.minX >= minX &&
+              b.maxX <= maxX &&
+              b.minY >= minY &&
+              b.maxY <= maxY
+            );
+          })
+          .map((s) => s.id);
+        if (d.shiftKey) {
+          const merged = new Set<string>([...selectedSet, ...ids]);
+          onSelectMany?.(Array.from(merged));
+        } else {
+          if (ids.length > 0) onSelectMany?.(ids);
+          else onSelect?.(null);
+        }
+      }
+    }
     dragRef.current = null;
     if (isDragging) setIsDragging(false);
   }
@@ -479,15 +670,32 @@ function SceneCanvas({
       onPlaceShape(activeTool, wx, wy);
       return;
     }
+    if (e.shiftKey) return;
     onSelect?.(null);
   }
 
   // Spacebar+drag = pan
   const panDragRef = useRef<{ startX: number; startY: number } | null>(null);
   function handleSvgMouseDown(e: React.MouseEvent<SVGSVGElement>) {
-    if (!spacePan) return;
-    panDragRef.current = { startX: e.clientX, startY: e.clientY };
-    movedRef.current = false;
+    if (spacePan) {
+      panDragRef.current = { startX: e.clientX, startY: e.clientY };
+      movedRef.current = false;
+      return;
+    }
+    // Start a marquee on empty-canvas mousedown when using the Select tool.
+    // (Shape mousedown handlers stopPropagation, so this only fires on empty.)
+    if (activeTool === "select" && onUpdateShape) {
+      const [wx, wy] = svgToWorld(e.clientX, e.clientY);
+      dragRef.current = {
+        type: "marquee",
+        startWX: wx,
+        startWY: wy,
+        currentWX: wx,
+        currentWY: wy,
+        shiftKey: e.shiftKey,
+      };
+      movedRef.current = false;
+    }
   }
   function handlePanMove(e: React.MouseEvent<SVGSVGElement>) {
     if (!panDragRef.current) return;
@@ -690,7 +898,10 @@ function SceneCanvas({
         {scene.shapes.map((s) =>
           renderShape(s, toX, toY, dx, {
             selectedId,
+            selectedIds: selectedSet,
             clickedButtonId,
+            showConnectionPoints:
+              activeTool === "line" || activeTool === "polyline",
             onClick: onClickButton,
             onMouseDown:
               onUpdateShape && activeTool === "select" && !spacePan
@@ -704,11 +915,35 @@ function SceneCanvas({
 
         {onUpdateShape &&
           activeTool === "select" &&
+          singleSelected &&
           scene.shapes
             .filter((s) => s.id === selectedId)
             .map((s) =>
               renderHandles(s, toX, toY, (e, h) => beginResize(e, s, h)),
             )}
+
+        {dragRef.current?.type === "marquee" &&
+          (() => {
+            const d = dragRef.current;
+            const x1 = toX(d.startWX);
+            const x2 = toX(d.currentWX);
+            const y1 = toY(d.startWY);
+            const y2 = toY(d.currentWY);
+            return (
+              <rect
+                x={Math.min(x1, x2)}
+                y={Math.min(y1, y2)}
+                width={Math.abs(x2 - x1)}
+                height={Math.abs(y2 - y1)}
+                fill="#22d3ee"
+                fillOpacity="0.08"
+                stroke="#22d3ee"
+                strokeWidth="1.5"
+                strokeDasharray="4 3"
+                pointerEvents="none"
+              />
+            );
+          })()}
       </svg>
     </div>
   );
@@ -726,6 +961,14 @@ function movePatch(s: SceneShape, dxw: number, dyw: number): Partial<SceneShape>
       y2: round(s.y2 + dyw),
     };
   }
+  if (s.kind === "polyline") {
+    return {
+      vertices: s.vertices.map((v) => ({
+        x: round(v.x + dxw),
+        y: round(v.y + dyw),
+      })),
+    };
+  }
   return { cx: round(s.cx + dxw), cy: round(s.cy + dyw) };
 }
 
@@ -739,6 +982,14 @@ function resizePatch(
     if (handle === "end1") return { x1: round(wx), y1: round(wy) };
     if (handle === "end2") return { x2: round(wx), y2: round(wy) };
     return null;
+  }
+  if (s.kind === "polyline") {
+    const idx = handle === "v0" ? 0 : handle === "v1" ? 1 : handle === "v2" ? 2 : -1;
+    if (idx < 0 || idx >= s.vertices.length) return null;
+    const vertices = s.vertices.map((v, i) =>
+      i === idx ? { x: round(wx), y: round(wy) } : v,
+    );
+    return { vertices };
   }
   if (s.kind === "circle") {
     if (handle !== "radius") return null;
@@ -804,6 +1055,16 @@ function renderHandles(
       </g>
     );
   }
+  if (s.kind === "polyline") {
+    const handles: ResizeHandle[] = ["v0", "v1", "v2"];
+    return (
+      <g key={`${s.id}-handles`}>
+        {s.vertices.slice(0, 3).map((v, i) =>
+          dot(toX(v.x), toY(v.y), handles[i], "grab"),
+        )}
+      </g>
+    );
+  }
   if (s.kind === "circle") {
     return (
       <g key={`${s.id}-handles`}>
@@ -835,14 +1096,17 @@ function renderShape(
   dx: number,
   ctx: {
     selectedId?: string;
+    selectedIds?: Set<string>;
     clickedButtonId?: string;
+    showConnectionPoints?: boolean;
     onClick?: (buttonId: string) => void;
     onMouseDown?: (e: React.MouseEvent<SVGGElement>) => void;
     onContextMenu?: (e: React.MouseEvent<SVGGElement>) => void;
   },
 ) {
   const color = COLORS[s.color] ?? s.color;
-  const isSelected = ctx.selectedId === s.id;
+  const isSelected =
+    ctx.selectedId === s.id || (ctx.selectedIds?.has(s.id) ?? false);
   const selectionStroke = isSelected ? "#22d3ee" : undefined;
 
   const interact: {
@@ -857,13 +1121,15 @@ function renderShape(
 
   if (s.kind === "circle") {
     const r = (s.r / dx) * W;
+    const fillColor = s.filled ? color : "none";
+    const labelColor = s.filled ? "#0a0a0a" : color;
     return (
       <g key={s.id} {...interact}>
         <circle
           cx={toX(s.cx)}
           cy={toY(s.cy)}
           r={r}
-          fill="none"
+          fill={fillColor}
           stroke={selectionStroke ?? color}
           strokeWidth={isSelected ? "3" : "2"}
         />
@@ -871,7 +1137,7 @@ function renderShape(
           <text
             x={toX(s.cx)}
             y={toY(s.cy) + 5}
-            fill={color}
+            fill={labelColor}
             fontSize="14"
             fontWeight="600"
             textAnchor="middle"
@@ -898,9 +1164,28 @@ function renderShape(
       </g>
     );
   }
+  if (s.kind === "polyline") {
+    const points = s.vertices.map((v) => `${toX(v.x)},${toY(v.y)}`).join(" ");
+    return (
+      <g key={s.id} {...interact}>
+        <polyline
+          points={points}
+          fill="none"
+          stroke={selectionStroke ?? color}
+          strokeWidth={isSelected ? "4" : "2.5"}
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+      </g>
+    );
+  }
   if (s.kind === "rect") {
     const w = (s.w / dx) * W;
     const h = (s.h / dx) * W;
+    const fillColor = s.filled ? color : "none";
+    const labelColor = s.filled ? "#0a0a0a" : color;
+    const showConnPts = ctx.showConnectionPoints || isSelected;
+    const connOpacity = isSelected ? 0.9 : 0.35;
     return (
       <g key={s.id} {...interact}>
         <rect
@@ -908,7 +1193,7 @@ function renderShape(
           y={toY(s.cy) - h / 2}
           width={w}
           height={h}
-          fill="none"
+          fill={fillColor}
           stroke={selectionStroke ?? color}
           strokeWidth={isSelected ? "3" : "2"}
           rx="4"
@@ -917,7 +1202,7 @@ function renderShape(
           <text
             x={toX(s.cx)}
             y={toY(s.cy) + 5}
-            fill={color}
+            fill={labelColor}
             fontSize="14"
             fontWeight="600"
             textAnchor="middle"
@@ -925,6 +1210,28 @@ function renderShape(
           >
             {s.label}
           </text>
+        )}
+        {showConnPts && (
+          <g pointerEvents="none" opacity={connOpacity}>
+            {[
+              { x: s.cx, y: s.cy + s.h / 2 },
+              { x: s.cx, y: s.cy - s.h / 2 },
+              { x: s.cx - s.w / 2, y: s.cy },
+              { x: s.cx + s.w / 2, y: s.cy },
+            ].map((p, i) => (
+              <g key={i}>
+                <circle
+                  cx={toX(p.x)}
+                  cy={toY(p.y)}
+                  r="4"
+                  fill="#0a0a0c"
+                  stroke="#22d3ee"
+                  strokeWidth="1.5"
+                />
+                <circle cx={toX(p.x)} cy={toY(p.y)} r="1.5" fill="#22d3ee" />
+              </g>
+            ))}
+          </g>
         )}
       </g>
     );
@@ -1114,10 +1421,12 @@ export function SceneEditor({
   scene: Scene;
   onChange: (next: Scene) => void;
 }) {
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [activeTool, setActiveTool] = useState<ActiveTool>("select");
   const [boundsOpen, setBoundsOpen] = useState(false);
   const [spacePan, setSpacePan] = useState(false);
+
+  const selectedId = selectedIds.length === 1 ? selectedIds[0] : null;
 
   // Undo/redo history stacks (refs to avoid re-renders on every push)
   const historyRef = useRef<Scene[]>([]);
@@ -1128,15 +1437,19 @@ export function SceneEditor({
   }, [scene]);
 
   const selected = useMemo(
-    () => scene.shapes.find((s) => s.id === selectedId) ?? null,
+    () =>
+      selectedId
+        ? (scene.shapes.find((s) => s.id === selectedId) ?? null)
+        : null,
     [scene.shapes, selectedId],
   );
 
   useEffect(() => {
-    if (selectedId && !scene.shapes.some((s) => s.id === selectedId)) {
-      setSelectedId(null);
-    }
-  }, [scene.shapes, selectedId]);
+    setSelectedIds((cur) => {
+      const filtered = cur.filter((id) => scene.shapes.some((s) => s.id === id));
+      return filtered.length === cur.length ? cur : filtered;
+    });
+  }, [scene.shapes]);
 
   function snapshot() {
     historyRef.current.push(sceneRef.current);
@@ -1167,30 +1480,45 @@ export function SceneEditor({
     });
   }
 
+  function updateShapes(updates: { id: string; patch: Partial<SceneShape> }[]) {
+    const map = new Map(updates.map((u) => [u.id, u.patch]));
+    onChange({
+      ...scene,
+      shapes: scene.shapes.map((s) => {
+        const p = map.get(s.id);
+        return p ? ({ ...s, ...p } as SceneShape) : s;
+      }),
+    });
+  }
+
+  function applyPatchToSelected(patch: Partial<SceneShape>) {
+    if (selectedIds.length === 0) return;
+    if (selectedIds.length === 1) {
+      updateShape(selectedIds[0], patch);
+    } else {
+      updateShapes(selectedIds.map((id) => ({ id, patch })));
+    }
+  }
+
   function placeShape(kind: SceneShape["kind"], wx: number, wy: number) {
     snapshot();
     const s = makeShape(kind, wx, wy);
     onChange({ ...scene, shapes: [...scene.shapes, s] });
-    setSelectedId(s.id);
+    setSelectedIds([s.id]);
     setActiveTool("select");
   }
 
-  function duplicateShape(id: string) {
-    const shape = scene.shapes.find((s) => s.id === id);
-    if (!shape) return;
-    snapshot();
-    const newId = uid();
-    const offset = 0.6;
-    let copy: SceneShape;
+  function copyShape(shape: SceneShape, newId: string, offset: number): SceneShape {
     if (shape.kind === "point" || shape.kind === "text") {
-      copy = {
+      return {
         ...shape,
         id: newId,
         x: round(shape.x + offset),
         y: round(shape.y - offset),
       };
-    } else if (shape.kind === "line") {
-      copy = {
+    }
+    if (shape.kind === "line") {
+      return {
         ...shape,
         id: newId,
         x1: round(shape.x1 + offset),
@@ -1198,24 +1526,59 @@ export function SceneEditor({
         x2: round(shape.x2 + offset),
         y2: round(shape.y2 - offset),
       };
-    } else if (shape.kind === "button") {
-      copy = {
+    }
+    if (shape.kind === "polyline") {
+      return {
+        ...shape,
+        id: newId,
+        vertices: shape.vertices.map((v) => ({
+          x: round(v.x + offset),
+          y: round(v.y - offset),
+        })),
+      };
+    }
+    if (shape.kind === "button") {
+      return {
         ...shape,
         id: newId,
         cx: round(shape.cx + offset),
         cy: round(shape.cy - offset),
         buttonId: `btn-${newId}`,
       };
-    } else {
-      copy = {
-        ...shape,
-        id: newId,
-        cx: round(shape.cx + offset),
-        cy: round(shape.cy - offset),
-      };
     }
+    return {
+      ...shape,
+      id: newId,
+      cx: round(shape.cx + offset),
+      cy: round(shape.cy - offset),
+    };
+  }
+
+  function duplicateShape(id: string) {
+    const shape = scene.shapes.find((s) => s.id === id);
+    if (!shape) return;
+    snapshot();
+    const newId = uid();
+    const copy = copyShape(shape, newId, 0.6);
     onChange({ ...scene, shapes: [...scene.shapes, copy] });
-    setSelectedId(newId);
+    setSelectedIds([newId]);
+  }
+
+  function duplicateSelected() {
+    if (selectedIds.length === 0) return;
+    snapshot();
+    const offset = 0.6;
+    const newIds: string[] = [];
+    const additions: SceneShape[] = [];
+    for (const id of selectedIds) {
+      const shape = scene.shapes.find((s) => s.id === id);
+      if (!shape) continue;
+      const newId = uid();
+      newIds.push(newId);
+      additions.push(copyShape(shape, newId, offset));
+    }
+    onChange({ ...scene, shapes: [...scene.shapes, ...additions] });
+    setSelectedIds(newIds);
   }
 
   function removeShape(id: string) {
@@ -1233,7 +1596,25 @@ export function SceneEditor({
       next.correctButtonId = undefined;
     }
     onChange(next);
-    if (selectedId === id) setSelectedId(null);
+    setSelectedIds((cur) => cur.filter((sid) => sid !== id));
+  }
+
+  function removeSelected() {
+    if (selectedIds.length === 0) return;
+    snapshot();
+    const ids = new Set(selectedIds);
+    let correctButtonId = scene.correctButtonId;
+    for (const s of scene.shapes) {
+      if (s.kind === "button" && ids.has(s.id) && correctButtonId === s.buttonId) {
+        correctButtonId = undefined;
+      }
+    }
+    onChange({
+      ...scene,
+      shapes: scene.shapes.filter((s) => !ids.has(s.id)),
+      correctButtonId,
+    });
+    setSelectedIds([]);
   }
 
   function reorderShape(
@@ -1260,11 +1641,22 @@ export function SceneEditor({
     onChange({ ...scene, shapes });
   }
 
-  function nudge(id: string, dxw: number, dyw: number) {
-    const shape = scene.shapes.find((s) => s.id === id);
-    if (!shape) return;
+  function nudgeSelected(dxw: number, dyw: number) {
+    if (selectedIds.length === 0) return;
     snapshot();
-    updateShape(id, movePatch(shape, dxw, dyw));
+    const updates = selectedIds
+      .map((id) => {
+        const shape = scene.shapes.find((s) => s.id === id);
+        return shape ? { id, patch: movePatch(shape, dxw, dyw) } : null;
+      })
+      .filter((x): x is { id: string; patch: Partial<SceneShape> } => !!x);
+    updateShapes(updates);
+  }
+
+  function toggleSelect(id: string) {
+    setSelectedIds((cur) =>
+      cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id],
+    );
   }
 
   // Keyboard shortcuts
@@ -1305,33 +1697,40 @@ export function SceneEditor({
         return;
       }
 
+      // Cmd/Ctrl+A: select all
+      if (mod && e.key.toLowerCase() === "a") {
+        e.preventDefault();
+        setSelectedIds(scene.shapes.map((s) => s.id));
+        return;
+      }
+
       // Esc: deselect / reset tool
       if (e.key === "Escape") {
-        setSelectedId(null);
+        setSelectedIds([]);
         setActiveTool("select");
         return;
       }
 
       // Delete / Backspace
       if (e.key === "Delete" || e.key === "Backspace") {
-        if (selectedId) {
+        if (selectedIds.length > 0) {
           e.preventDefault();
-          removeShape(selectedId);
+          removeSelected();
         }
         return;
       }
 
       // Cmd/Ctrl+D: duplicate
       if (mod && e.key.toLowerCase() === "d") {
-        if (selectedId) {
+        if (selectedIds.length > 0) {
           e.preventDefault();
-          duplicateShape(selectedId);
+          duplicateSelected();
         }
         return;
       }
 
       // Arrow nudge (Shift = bigger step)
-      if (selectedId && e.key.startsWith("Arrow")) {
+      if (selectedIds.length > 0 && e.key.startsWith("Arrow")) {
         e.preventDefault();
         const step = e.shiftKey ? 1.0 : 0.1;
         let dxw = 0;
@@ -1340,7 +1739,7 @@ export function SceneEditor({
         else if (e.key === "ArrowRight") dxw = step;
         else if (e.key === "ArrowUp") dyw = step;
         else if (e.key === "ArrowDown") dyw = -step;
-        nudge(selectedId, dxw, dyw);
+        nudgeSelected(dxw, dyw);
       }
     }
 
@@ -1357,7 +1756,7 @@ export function SceneEditor({
       document.removeEventListener("keyup", onKeyUp);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedId, scene.shapes]);
+  }, [selectedIds, scene.shapes]);
 
   return (
     <div className="overflow-hidden rounded-2xl bg-zinc-950 ring-1 ring-zinc-800">
@@ -1368,7 +1767,7 @@ export function SceneEditor({
             activeTool={activeTool}
             onSelectTool={(t) => {
               setActiveTool(t);
-              if (t !== "select") setSelectedId(null);
+              if (t !== "select") setSelectedIds([]);
             }}
             boundsOpen={boundsOpen}
             onToggleBounds={() => setBoundsOpen((v) => !v)}
@@ -1379,10 +1778,16 @@ export function SceneEditor({
         <div className="absolute left-1/2 top-4 z-20 -translate-x-1/2">
           <ContextBar
             selected={selected}
+            multiCount={selectedIds.length}
             correctButtonId={scene.correctButtonId}
             onBeginEdit={snapshot}
             onUpdate={(patch) => selected && updateShape(selected.id, patch)}
+            onMultiUpdate={(patch) => {
+              snapshot();
+              applyPatchToSelected(patch);
+            }}
             onRemove={() => selected && removeShape(selected.id)}
+            onMultiRemove={removeSelected}
             onSetCorrect={(buttonId) => {
               snapshot();
               onChange({ ...scene, correctButtonId: buttonId });
@@ -1393,13 +1798,27 @@ export function SceneEditor({
         <SceneCanvas
           scene={scene}
           selectedId={selectedId ?? undefined}
+          selectedIds={selectedIds}
           activeTool={activeTool}
           spacePan={spacePan}
-          onSelect={(id) => {
+          onSelect={(id, opts) => {
             if (activeTool !== "select") setActiveTool("select");
-            setSelectedId(id);
+            if (id === null) {
+              setSelectedIds([]);
+              return;
+            }
+            if (opts?.additive) {
+              toggleSelect(id);
+            } else {
+              setSelectedIds([id]);
+            }
+          }}
+          onSelectMany={(ids) => {
+            if (activeTool !== "select") setActiveTool("select");
+            setSelectedIds(ids);
           }}
           onUpdateShape={updateShape}
+          onUpdateShapes={updateShapes}
           onPlaceShape={placeShape}
           onDuplicateShape={duplicateShape}
           onRemoveShape={removeShape}
@@ -1422,7 +1841,9 @@ const TOOL_COLORS = {
   point: { idle: "text-rose-300", active: "bg-rose-500/15 text-rose-200" },
   circle: { idle: "text-emerald-300", active: "bg-emerald-500/15 text-emerald-200" },
   rect: { idle: "text-indigo-300", active: "bg-indigo-500/15 text-indigo-200" },
+  lines: { idle: "text-sky-300", active: "bg-sky-500/15 text-sky-200" },
   line: { idle: "text-sky-300", active: "bg-sky-500/15 text-sky-200" },
+  polyline: { idle: "text-sky-300", active: "bg-sky-500/15 text-sky-200" },
   text: { idle: "text-violet-300", active: "bg-violet-500/15 text-violet-200" },
   button: { idle: "text-amber-300", active: "bg-amber-500/15 text-amber-200" },
   canvas: { idle: "text-zinc-400", active: "bg-zinc-700/40 text-zinc-100" },
@@ -1440,27 +1861,38 @@ function Sidebar({
   onToggleBounds: () => void;
 }) {
   const [shapesOpen, setShapesOpen] = useState(false);
-  const flyoutRef = useRef<HTMLDivElement>(null);
+  const [linesOpen, setLinesOpen] = useState(false);
+  const shapesFlyoutRef = useRef<HTMLDivElement>(null);
   const shapesAnchorRef = useRef<HTMLButtonElement>(null);
+  const linesFlyoutRef = useRef<HTMLDivElement>(null);
+  const linesAnchorRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
-    if (!shapesOpen) return;
+    if (!shapesOpen && !linesOpen) return;
     function onDocClick(e: MouseEvent) {
       const target = e.target as Node;
       if (
-        flyoutRef.current?.contains(target) ||
+        shapesFlyoutRef.current?.contains(target) ||
         shapesAnchorRef.current?.contains(target)
       ) {
         return;
       }
+      if (
+        linesFlyoutRef.current?.contains(target) ||
+        linesAnchorRef.current?.contains(target)
+      ) {
+        return;
+      }
       setShapesOpen(false);
+      setLinesOpen(false);
     }
     document.addEventListener("mousedown", onDocClick);
     return () => document.removeEventListener("mousedown", onDocClick);
-  }, [shapesOpen]);
+  }, [shapesOpen, linesOpen]);
 
   const shapeActive =
     activeTool === "point" || activeTool === "circle" || activeTool === "rect";
+  const lineActive = activeTool === "line" || activeTool === "polyline";
 
   return (
     <div className="relative flex flex-col gap-1 rounded-2xl bg-zinc-900/95 p-1.5 shadow-2xl shadow-black/60 ring-1 ring-white/5 backdrop-blur">
@@ -1485,7 +1917,7 @@ function Sidebar({
         </ToolButton>
         {shapesOpen && (
           <div
-            ref={flyoutRef}
+            ref={shapesFlyoutRef}
             className="absolute left-full top-0 z-20 ml-2 flex flex-col gap-1 rounded-2xl bg-zinc-900 p-2 shadow-2xl ring-1 ring-zinc-800"
           >
             <FlyoutItem
@@ -1525,14 +1957,46 @@ function Sidebar({
         )}
       </div>
 
-      <ToolButton
-        label="Line"
-        active={activeTool === "line"}
-        tone={TOOL_COLORS.line}
-        onClick={() => onSelectTool("line")}
-      >
-        <LineIcon />
-      </ToolButton>
+      <div className="relative">
+        <ToolButton
+          label="Lines"
+          active={lineActive || linesOpen}
+          tone={TOOL_COLORS.lines}
+          onClick={() => setLinesOpen((v) => !v)}
+          buttonRef={linesAnchorRef}
+        >
+          <LineIcon />
+        </ToolButton>
+        {linesOpen && (
+          <div
+            ref={linesFlyoutRef}
+            className="absolute left-full top-0 z-20 ml-2 flex flex-col gap-1 rounded-2xl bg-zinc-900 p-2 shadow-2xl ring-1 ring-zinc-800"
+          >
+            <FlyoutItem
+              label="Line"
+              onClick={() => {
+                onSelectTool("line");
+                setLinesOpen(false);
+              }}
+              tone={TOOL_COLORS.line}
+              active={activeTool === "line"}
+            >
+              <LineIcon />
+            </FlyoutItem>
+            <FlyoutItem
+              label="Polyline (3 vertices)"
+              onClick={() => {
+                onSelectTool("polyline");
+                setLinesOpen(false);
+              }}
+              tone={TOOL_COLORS.polyline}
+              active={activeTool === "polyline"}
+            >
+              <PolylineIcon />
+            </FlyoutItem>
+          </div>
+        )}
+      </div>
 
       <ToolButton
         label="Text"
@@ -1643,23 +2107,78 @@ function FlyoutItem({
 
 function ContextBar({
   selected,
+  multiCount = 0,
   correctButtonId,
   onBeginEdit,
   onUpdate,
+  onMultiUpdate,
   onRemove,
+  onMultiRemove,
   onSetCorrect,
 }: {
   selected: SceneShape | null;
+  multiCount?: number;
   correctButtonId?: string;
   onBeginEdit?: () => void;
   onUpdate: (patch: Partial<SceneShape>) => void;
+  onMultiUpdate?: (patch: Partial<SceneShape>) => void;
   onRemove: () => void;
+  onMultiRemove?: () => void;
   onSetCorrect: (id: string | undefined) => void;
 }) {
+  if (!selected && multiCount > 1) {
+    return (
+      <div className="flex items-center gap-2 rounded-full bg-zinc-900/95 px-3 py-1.5 shadow-2xl shadow-black/60 ring-1 ring-white/5 backdrop-blur">
+        <span className="text-[10px] font-semibold uppercase tracking-wider text-cyan-300">
+          {multiCount} selected
+        </span>
+        <Sep />
+        <ColorBar
+          color="cyan"
+          onChange={(c) => onMultiUpdate?.({ color: c })}
+        />
+        <Sep />
+        <button
+          type="button"
+          onClick={() => onMultiUpdate?.({ filled: true })}
+          className="rounded-full bg-zinc-950/60 px-2 py-1 text-[10px] font-medium uppercase tracking-wider text-zinc-300 ring-1 ring-zinc-800 transition hover:bg-zinc-800 hover:text-zinc-100"
+          title="Fill all"
+        >
+          Fill all
+        </button>
+        <button
+          type="button"
+          onClick={() => onMultiUpdate?.({ filled: false })}
+          className="rounded-full bg-zinc-950/60 px-2 py-1 text-[10px] font-medium uppercase tracking-wider text-zinc-300 ring-1 ring-zinc-800 transition hover:bg-zinc-800 hover:text-zinc-100"
+          title="Outline all"
+        >
+          Outline all
+        </button>
+        <button
+          type="button"
+          onClick={onMultiRemove}
+          className="ml-1 rounded-md p-1.5 text-zinc-500 transition hover:bg-rose-500/10 hover:text-rose-300"
+          aria-label="Delete selected"
+          title="Delete selected"
+        >
+          <svg
+            viewBox="0 0 16 16"
+            className="h-3.5 w-3.5"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+          >
+            <line x1="3" y1="3" x2="13" y2="13" />
+            <line x1="13" y1="3" x2="3" y2="13" />
+          </svg>
+        </button>
+      </div>
+    );
+  }
   if (!selected) {
     return (
       <div className="rounded-full bg-zinc-900/95 px-4 py-1.5 text-[11px] text-zinc-500 shadow-lg shadow-black/40 ring-1 ring-white/5 backdrop-blur">
-        Pick a tool to add a shape · click an existing shape to edit
+        Pick a tool to add a shape · click an existing shape to edit · shift-click to multi-select
       </div>
     );
   }
@@ -1682,6 +2201,20 @@ function ContextBar({
           onUpdate({ color: c });
         }}
       />
+
+      {(selected.kind === "circle" || selected.kind === "rect") && (
+        <>
+          <Sep />
+          <FillToggle
+            filled={!!selected.filled}
+            color={selected.color}
+            onToggle={() => {
+              onBeginEdit?.();
+              onUpdate({ filled: !selected.filled });
+            }}
+          />
+        </>
+      )}
 
       {(selected.kind === "point" ||
         selected.kind === "circle" ||
@@ -1769,6 +2302,50 @@ function ContextBar({
 
 function Sep() {
   return <div className="h-5 w-px bg-zinc-800" />;
+}
+
+function FillToggle({
+  filled,
+  color,
+  onToggle,
+}: {
+  filled: boolean;
+  color: string;
+  onToggle: () => void;
+}) {
+  const swatch = COLORS[color] ?? color;
+  return (
+    <button
+      type="button"
+      onClick={onToggle}
+      title={filled ? "Switch to outline" : "Fill shape"}
+      aria-label={filled ? "Switch to outline" : "Fill shape"}
+      aria-pressed={filled}
+      className="flex h-7 items-center gap-1.5 rounded-full bg-zinc-950/60 px-2 ring-1 ring-zinc-800 transition hover:ring-zinc-600"
+    >
+      {filled ? (
+        <svg viewBox="0 0 16 16" className="h-3.5 w-3.5">
+          <rect x="2.5" y="2.5" width="11" height="11" rx="2" fill={swatch} />
+        </svg>
+      ) : (
+        <svg viewBox="0 0 16 16" className="h-3.5 w-3.5">
+          <rect
+            x="2.5"
+            y="2.5"
+            width="11"
+            height="11"
+            rx="2"
+            fill="none"
+            stroke={swatch}
+            strokeWidth="2"
+          />
+        </svg>
+      )}
+      <span className="text-[10px] font-medium uppercase tracking-wider text-zinc-400">
+        {filled ? "Fill" : "Outline"}
+      </span>
+    </button>
+  );
 }
 
 function ContextMenu({
