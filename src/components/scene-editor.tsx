@@ -230,12 +230,18 @@ type RendererProps = {
   selectedId?: string;
   clickedButtonId?: string;
   activeTool?: ActiveTool;
+  spacePan?: boolean;
   onSelect?: (id: string | null) => void;
   onUpdateShape?: (id: string, patch: Partial<SceneShape>) => void;
   onPlaceShape?: (kind: SceneShape["kind"], wx: number, wy: number) => void;
   onClickButton?: (buttonId: string) => void;
   onDuplicateShape?: (id: string) => void;
   onRemoveShape?: (id: string) => void;
+  onBeginEdit?: () => void;
+  onReorderShape?: (
+    id: string,
+    direction: "front" | "back" | "forward" | "backward",
+  ) => void;
 };
 
 function shapeTopAnchor(s: SceneShape): { x: number; y: number } {
@@ -251,12 +257,15 @@ function SceneCanvas({
   selectedId,
   clickedButtonId,
   activeTool = "select",
+  spacePan = false,
   onSelect,
   onUpdateShape,
   onPlaceShape,
   onClickButton,
   onDuplicateShape,
   onRemoveShape,
+  onBeginEdit,
+  onReorderShape,
 }: RendererProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const svgRef = useRef<SVGSVGElement>(null);
@@ -265,6 +274,24 @@ function SceneCanvas({
   const [view, setView] = useState({ zoom: 1, panX: 0, panY: 0 });
   const [, forceTick] = useState(0);
   const [isDragging, setIsDragging] = useState(false);
+  const [contextMenu, setContextMenu] = useState<{
+    shapeId: string;
+    x: number;
+    y: number;
+  } | null>(null);
+
+  useEffect(() => {
+    if (!contextMenu) return;
+    function close() {
+      setContextMenu(null);
+    }
+    document.addEventListener("mousedown", close);
+    document.addEventListener("scroll", close, true);
+    return () => {
+      document.removeEventListener("mousedown", close);
+      document.removeEventListener("scroll", close, true);
+    };
+  }, [contextMenu]);
 
   const editable = !!onUpdateShape;
 
@@ -384,9 +411,10 @@ function SceneCanvas({
   }
 
   function beginMove(e: React.MouseEvent, shape: SceneShape) {
-    if (!onUpdateShape || activeTool !== "select") return;
+    if (!onUpdateShape || activeTool !== "select" || spacePan) return;
     e.stopPropagation();
     onSelect?.(shape.id);
+    onBeginEdit?.();
     const [wx, wy] = svgToWorld(e.clientX, e.clientY);
     dragRef.current = {
       type: "move",
@@ -402,6 +430,7 @@ function SceneCanvas({
   function beginResize(e: React.MouseEvent, shape: SceneShape, handle: ResizeHandle) {
     if (!onUpdateShape) return;
     e.stopPropagation();
+    onBeginEdit?.();
     const [wx, wy] = svgToWorld(e.clientX, e.clientY);
     dragRef.current = {
       type: "resize",
@@ -444,6 +473,7 @@ function SceneCanvas({
       movedRef.current = false;
       return;
     }
+    if (spacePan) return;
     if (activeTool !== "select" && onPlaceShape) {
       const [wx, wy] = svgToWorld(e.clientX, e.clientY);
       onPlaceShape(activeTool, wx, wy);
@@ -452,7 +482,53 @@ function SceneCanvas({
     onSelect?.(null);
   }
 
-  const placementMode = activeTool !== "select";
+  // Spacebar+drag = pan
+  const panDragRef = useRef<{ startX: number; startY: number } | null>(null);
+  function handleSvgMouseDown(e: React.MouseEvent<SVGSVGElement>) {
+    if (!spacePan) return;
+    panDragRef.current = { startX: e.clientX, startY: e.clientY };
+    movedRef.current = false;
+  }
+  function handlePanMove(e: React.MouseEvent<SVGSVGElement>) {
+    if (!panDragRef.current) return;
+    const svg = svgRef.current;
+    if (!svg) return;
+    const rect = svg.getBoundingClientRect();
+    const dxPx = e.clientX - panDragRef.current.startX;
+    const dyPx = e.clientY - panDragRef.current.startY;
+    if (Math.abs(dxPx) < 1 && Math.abs(dyPx) < 1) return;
+    panDragRef.current.startX = e.clientX;
+    panDragRef.current.startY = e.clientY;
+    movedRef.current = true;
+    setView((v) => ({
+      ...v,
+      panX: v.panX - (dxPx / rect.width) * (W / v.zoom),
+      panY: v.panY - (dyPx / rect.height) * (H / v.zoom),
+    }));
+  }
+  function handlePanUp() {
+    panDragRef.current = null;
+  }
+
+  function handleShapeContextMenu(
+    e: React.MouseEvent<SVGGElement>,
+    shape: SceneShape,
+  ) {
+    if (!editable) return;
+    e.preventDefault();
+    e.stopPropagation();
+    onSelect?.(shape.id);
+    const container = containerRef.current;
+    if (!container) return;
+    const rect = container.getBoundingClientRect();
+    setContextMenu({
+      shapeId: shape.id,
+      x: e.clientX - rect.left,
+      y: e.clientY - rect.top,
+    });
+  }
+
+  const placementMode = activeTool !== "select" && !spacePan;
 
   const viewIsDefault = view.zoom === 1 && view.panX === 0 && view.panY === 0;
 
@@ -467,6 +543,38 @@ function SceneCanvas({
         >
           {Math.round(view.zoom * 100)}% · Reset
         </button>
+      )}
+
+      {contextMenu && editable && (
+        <ContextMenu
+          x={contextMenu.x}
+          y={contextMenu.y}
+          onClose={() => setContextMenu(null)}
+          onDuplicate={
+            onDuplicateShape
+              ? () => {
+                  onDuplicateShape(contextMenu.shapeId);
+                  setContextMenu(null);
+                }
+              : undefined
+          }
+          onRemove={
+            onRemoveShape
+              ? () => {
+                  onRemoveShape(contextMenu.shapeId);
+                  setContextMenu(null);
+                }
+              : undefined
+          }
+          onReorder={
+            onReorderShape
+              ? (dir) => {
+                  onReorderShape(contextMenu.shapeId, dir);
+                  setContextMenu(null);
+                }
+              : undefined
+          }
+        />
       )}
 
       {showFloatingMenu && floatingPos && (
@@ -498,6 +606,13 @@ function SceneCanvas({
                 <path d="M10.5 5.5V3.5a1.5 1.5 0 0 0-1.5-1.5H3.5A1.5 1.5 0 0 0 2 3.5v5.5A1.5 1.5 0 0 0 3.5 10.5h2" />
               </svg>
             </button>
+            {onReorderShape && (
+              <LayerMenuButton
+                onPick={(dir) =>
+                  selectedShape && onReorderShape(selectedShape.id, dir)
+                }
+              />
+            )}
             <button
               type="button"
               onClick={() => selectedShape && onRemoveShape?.(selectedShape.id)}
@@ -527,16 +642,30 @@ function SceneCanvas({
         viewBox={`${view.panX} ${view.panY} ${vbW} ${vbH}`}
         className="block h-auto w-full"
         preserveAspectRatio="xMidYMid meet"
-        onMouseMove={handleMouseMove}
-        onMouseUp={handleMouseUp}
-        onMouseLeave={handleMouseUp}
+        onMouseDown={handleSvgMouseDown}
+        onMouseMove={(e) => {
+          if (panDragRef.current) handlePanMove(e);
+          else handleMouseMove(e);
+        }}
+        onMouseUp={() => {
+          if (panDragRef.current) handlePanUp();
+          else handleMouseUp();
+        }}
+        onMouseLeave={() => {
+          if (panDragRef.current) handlePanUp();
+          else handleMouseUp();
+        }}
         onClick={handleSvgClick}
         style={{
-          cursor: placementMode
-            ? "crosshair"
-            : isDragging
+          cursor: spacePan
+            ? panDragRef.current
               ? "grabbing"
-              : "default",
+              : "grab"
+            : placementMode
+              ? "crosshair"
+              : isDragging
+                ? "grabbing"
+                : "default",
         }}
       >
         <defs>
@@ -563,8 +692,12 @@ function SceneCanvas({
             selectedId,
             clickedButtonId,
             onClick: onClickButton,
-            onMouseDown: onUpdateShape && activeTool === "select"
-              ? (e) => beginMove(e, s)
+            onMouseDown:
+              onUpdateShape && activeTool === "select" && !spacePan
+                ? (e) => beginMove(e, s)
+                : undefined,
+            onContextMenu: editable
+              ? (e) => handleShapeContextMenu(e, s)
               : undefined,
           }),
         )}
@@ -705,6 +838,7 @@ function renderShape(
     clickedButtonId?: string;
     onClick?: (buttonId: string) => void;
     onMouseDown?: (e: React.MouseEvent<SVGGElement>) => void;
+    onContextMenu?: (e: React.MouseEvent<SVGGElement>) => void;
   },
 ) {
   const color = COLORS[s.color] ?? s.color;
@@ -713,9 +847,11 @@ function renderShape(
 
   const interact: {
     onMouseDown?: (e: React.MouseEvent<SVGGElement>) => void;
+    onContextMenu?: (e: React.MouseEvent<SVGGElement>) => void;
     style?: React.CSSProperties;
   } = {
     onMouseDown: ctx.onMouseDown,
+    onContextMenu: ctx.onContextMenu,
     style: ctx.onMouseDown ? { cursor: "grab" } : undefined,
   };
 
@@ -981,6 +1117,15 @@ export function SceneEditor({
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [activeTool, setActiveTool] = useState<ActiveTool>("select");
   const [boundsOpen, setBoundsOpen] = useState(false);
+  const [spacePan, setSpacePan] = useState(false);
+
+  // Undo/redo history stacks (refs to avoid re-renders on every push)
+  const historyRef = useRef<Scene[]>([]);
+  const redoRef = useRef<Scene[]>([]);
+  const sceneRef = useRef(scene);
+  useEffect(() => {
+    sceneRef.current = scene;
+  }, [scene]);
 
   const selected = useMemo(
     () => scene.shapes.find((s) => s.id === selectedId) ?? null,
@@ -993,27 +1138,25 @@ export function SceneEditor({
     }
   }, [scene.shapes, selectedId]);
 
-  // Delete / Backspace removes the selected shape (unless typing in a field).
-  useEffect(() => {
-    function onKey(e: KeyboardEvent) {
-      if (!selectedId) return;
-      if (e.key !== "Delete" && e.key !== "Backspace") return;
-      const target = e.target as HTMLElement | null;
-      if (
-        target &&
-        (target.tagName === "INPUT" ||
-          target.tagName === "TEXTAREA" ||
-          target.isContentEditable)
-      ) {
-        return;
-      }
-      e.preventDefault();
-      removeShape(selectedId);
-    }
-    document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedId, scene.shapes]);
+  function snapshot() {
+    historyRef.current.push(sceneRef.current);
+    if (historyRef.current.length > 200) historyRef.current.shift();
+    redoRef.current = [];
+  }
+
+  function undo() {
+    const prev = historyRef.current.pop();
+    if (!prev) return;
+    redoRef.current.push(sceneRef.current);
+    onChange(prev);
+  }
+
+  function redo() {
+    const next = redoRef.current.pop();
+    if (!next) return;
+    historyRef.current.push(sceneRef.current);
+    onChange(next);
+  }
 
   function updateShape(id: string, patch: Partial<SceneShape>) {
     onChange({
@@ -1025,6 +1168,7 @@ export function SceneEditor({
   }
 
   function placeShape(kind: SceneShape["kind"], wx: number, wy: number) {
+    snapshot();
     const s = makeShape(kind, wx, wy);
     onChange({ ...scene, shapes: [...scene.shapes, s] });
     setSelectedId(s.id);
@@ -1034,6 +1178,7 @@ export function SceneEditor({
   function duplicateShape(id: string) {
     const shape = scene.shapes.find((s) => s.id === id);
     if (!shape) return;
+    snapshot();
     const newId = uid();
     const offset = 0.6;
     let copy: SceneShape;
@@ -1075,12 +1220,13 @@ export function SceneEditor({
 
   function removeShape(id: string) {
     const shape = scene.shapes.find((s) => s.id === id);
+    if (!shape) return;
+    snapshot();
     const next: Scene = {
       ...scene,
       shapes: scene.shapes.filter((s) => s.id !== id),
     };
     if (
-      shape &&
       shape.kind === "button" &&
       next.correctButtonId === shape.buttonId
     ) {
@@ -1089,6 +1235,129 @@ export function SceneEditor({
     onChange(next);
     if (selectedId === id) setSelectedId(null);
   }
+
+  function reorderShape(
+    id: string,
+    direction: "front" | "back" | "forward" | "backward",
+  ) {
+    const idx = scene.shapes.findIndex((s) => s.id === id);
+    if (idx === -1) return;
+    const shape = scene.shapes[idx];
+    snapshot();
+    const others = scene.shapes.filter((_, i) => i !== idx);
+    let shapes: SceneShape[];
+    if (direction === "front") {
+      shapes = [...others, shape];
+    } else if (direction === "back") {
+      shapes = [shape, ...others];
+    } else if (direction === "forward") {
+      shapes = [...others];
+      shapes.splice(Math.min(idx + 1, others.length), 0, shape);
+    } else {
+      shapes = [...others];
+      shapes.splice(Math.max(idx - 1, 0), 0, shape);
+    }
+    onChange({ ...scene, shapes });
+  }
+
+  function nudge(id: string, dxw: number, dyw: number) {
+    const shape = scene.shapes.find((s) => s.id === id);
+    if (!shape) return;
+    snapshot();
+    updateShape(id, movePatch(shape, dxw, dyw));
+  }
+
+  // Keyboard shortcuts
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      const target = e.target as HTMLElement | null;
+      const inField =
+        !!target &&
+        (target.tagName === "INPUT" ||
+          target.tagName === "TEXTAREA" ||
+          target.isContentEditable);
+
+      const mod = e.metaKey || e.ctrlKey;
+
+      // Undo/redo work everywhere
+      if (mod && !e.shiftKey && e.key.toLowerCase() === "z") {
+        e.preventDefault();
+        undo();
+        return;
+      }
+      if (
+        mod &&
+        (e.key.toLowerCase() === "y" ||
+          (e.shiftKey && e.key.toLowerCase() === "z"))
+      ) {
+        e.preventDefault();
+        redo();
+        return;
+      }
+
+      // Suppress other shortcuts while typing in a field
+      if (inField) return;
+
+      // Spacebar: enter pan mode
+      if (e.code === "Space" && !e.repeat) {
+        e.preventDefault();
+        setSpacePan(true);
+        return;
+      }
+
+      // Esc: deselect / reset tool
+      if (e.key === "Escape") {
+        setSelectedId(null);
+        setActiveTool("select");
+        return;
+      }
+
+      // Delete / Backspace
+      if (e.key === "Delete" || e.key === "Backspace") {
+        if (selectedId) {
+          e.preventDefault();
+          removeShape(selectedId);
+        }
+        return;
+      }
+
+      // Cmd/Ctrl+D: duplicate
+      if (mod && e.key.toLowerCase() === "d") {
+        if (selectedId) {
+          e.preventDefault();
+          duplicateShape(selectedId);
+        }
+        return;
+      }
+
+      // Arrow nudge (Shift = bigger step)
+      if (selectedId && e.key.startsWith("Arrow")) {
+        e.preventDefault();
+        const step = e.shiftKey ? 1.0 : 0.1;
+        let dxw = 0;
+        let dyw = 0;
+        if (e.key === "ArrowLeft") dxw = -step;
+        else if (e.key === "ArrowRight") dxw = step;
+        else if (e.key === "ArrowUp") dyw = step;
+        else if (e.key === "ArrowDown") dyw = -step;
+        nudge(selectedId, dxw, dyw);
+      }
+    }
+
+    function onKeyUp(e: KeyboardEvent) {
+      if (e.code === "Space") {
+        setSpacePan(false);
+      }
+    }
+
+    document.addEventListener("keydown", onKey);
+    document.addEventListener("keyup", onKeyUp);
+    return () => {
+      document.removeEventListener("keydown", onKey);
+      document.removeEventListener("keyup", onKeyUp);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedId, scene.shapes]);
 
   return (
     <div className="overflow-hidden rounded-2xl bg-zinc-950 ring-1 ring-zinc-800">
@@ -1111,11 +1380,13 @@ export function SceneEditor({
           <ContextBar
             selected={selected}
             correctButtonId={scene.correctButtonId}
+            onBeginEdit={snapshot}
             onUpdate={(patch) => selected && updateShape(selected.id, patch)}
             onRemove={() => selected && removeShape(selected.id)}
-            onSetCorrect={(buttonId) =>
-              onChange({ ...scene, correctButtonId: buttonId })
-            }
+            onSetCorrect={(buttonId) => {
+              snapshot();
+              onChange({ ...scene, correctButtonId: buttonId });
+            }}
           />
         </div>
 
@@ -1123,6 +1394,7 @@ export function SceneEditor({
           scene={scene}
           selectedId={selectedId ?? undefined}
           activeTool={activeTool}
+          spacePan={spacePan}
           onSelect={(id) => {
             if (activeTool !== "select") setActiveTool("select");
             setSelectedId(id);
@@ -1131,6 +1403,8 @@ export function SceneEditor({
           onPlaceShape={placeShape}
           onDuplicateShape={duplicateShape}
           onRemoveShape={removeShape}
+          onBeginEdit={snapshot}
+          onReorderShape={reorderShape}
         />
       </div>
 
@@ -1370,12 +1644,14 @@ function FlyoutItem({
 function ContextBar({
   selected,
   correctButtonId,
+  onBeginEdit,
   onUpdate,
   onRemove,
   onSetCorrect,
 }: {
   selected: SceneShape | null;
   correctButtonId?: string;
+  onBeginEdit?: () => void;
   onUpdate: (patch: Partial<SceneShape>) => void;
   onRemove: () => void;
   onSetCorrect: (id: string | undefined) => void;
@@ -1401,7 +1677,10 @@ function ContextBar({
 
       <ColorBar
         color={selected.color}
-        onChange={(c) => onUpdate({ color: c })}
+        onChange={(c) => {
+          onBeginEdit?.();
+          onUpdate({ color: c });
+        }}
       />
 
       {(selected.kind === "point" ||
@@ -1411,6 +1690,7 @@ function ContextBar({
           <Sep />
           <input
             value={selected.label ?? ""}
+            onFocus={onBeginEdit}
             onChange={(e) => onUpdate({ label: e.target.value })}
             placeholder="Label"
             suppressHydrationWarning
@@ -1423,6 +1703,7 @@ function ContextBar({
           <Sep />
           <input
             value={selected.text}
+            onFocus={onBeginEdit}
             onChange={(e) => onUpdate({ text: e.target.value })}
             placeholder="Text"
             suppressHydrationWarning
@@ -1435,6 +1716,7 @@ function ContextBar({
           <Sep />
           <input
             value={selected.label}
+            onFocus={onBeginEdit}
             onChange={(e) => onUpdate({ label: e.target.value })}
             placeholder="Label"
             suppressHydrationWarning
@@ -1442,6 +1724,7 @@ function ContextBar({
           />
           <input
             value={selected.buttonId}
+            onFocus={onBeginEdit}
             onChange={(e) => onUpdate({ buttonId: e.target.value })}
             placeholder="ID"
             suppressHydrationWarning
@@ -1488,6 +1771,177 @@ function Sep() {
   return <div className="h-5 w-px bg-zinc-800" />;
 }
 
+function ContextMenu({
+  x,
+  y,
+  onClose,
+  onDuplicate,
+  onRemove,
+  onReorder,
+}: {
+  x: number;
+  y: number;
+  onClose: () => void;
+  onDuplicate?: () => void;
+  onRemove?: () => void;
+  onReorder?: (dir: "front" | "back" | "forward" | "backward") => void;
+}) {
+  void onClose;
+  type MenuItem =
+    | {
+        kind: "item";
+        label: string;
+        action: () => void;
+        shortcut?: string;
+        danger?: boolean;
+      }
+    | { kind: "divider" };
+
+  const items: MenuItem[] = [];
+  if (onDuplicate) {
+    items.push({
+      kind: "item",
+      label: "Duplicate",
+      shortcut: "Ctrl+D",
+      action: onDuplicate,
+    });
+  }
+  if (onReorder) {
+    items.push({ kind: "divider" });
+    items.push({
+      kind: "item",
+      label: "Bring to front",
+      action: () => onReorder("front"),
+    });
+    items.push({
+      kind: "item",
+      label: "Bring forward",
+      action: () => onReorder("forward"),
+    });
+    items.push({
+      kind: "item",
+      label: "Send backward",
+      action: () => onReorder("backward"),
+    });
+    items.push({
+      kind: "item",
+      label: "Send to back",
+      action: () => onReorder("back"),
+    });
+  }
+  if (onRemove) {
+    items.push({ kind: "divider" });
+    items.push({
+      kind: "item",
+      label: "Delete",
+      shortcut: "Del",
+      action: onRemove,
+      danger: true,
+    });
+  }
+
+  return (
+    <div
+      className="absolute z-50 w-44 overflow-hidden rounded-xl bg-zinc-900 py-1 shadow-2xl shadow-black/60 ring-1 ring-white/10 backdrop-blur"
+      style={{ left: x, top: y }}
+      onMouseDown={(e) => e.stopPropagation()}
+    >
+      {items.map((it, i) =>
+        it.kind === "divider" ? (
+          <div key={`d-${i}`} className="my-1 h-px bg-zinc-800" />
+        ) : (
+          <button
+            key={`m-${i}`}
+            type="button"
+            onClick={it.action}
+            className={
+              "flex w-full items-center justify-between px-3 py-1.5 text-left text-xs transition " +
+              (it.danger
+                ? "text-rose-300 hover:bg-rose-500/15 hover:text-rose-200"
+                : "text-zinc-200 hover:bg-zinc-800")
+            }
+          >
+            <span>{it.label}</span>
+            {it.shortcut && (
+              <span className="text-[10px] text-zinc-500">{it.shortcut}</span>
+            )}
+          </button>
+        ),
+      )}
+    </div>
+  );
+}
+
+function LayerMenuButton({
+  onPick,
+}: {
+  onPick: (dir: "front" | "back" | "forward" | "backward") => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    function onDocClick(e: MouseEvent) {
+      if (!ref.current?.contains(e.target as Node)) setOpen(false);
+    }
+    document.addEventListener("mousedown", onDocClick);
+    return () => document.removeEventListener("mousedown", onDocClick);
+  }, [open]);
+
+  const items: {
+    label: string;
+    dir: "front" | "back" | "forward" | "backward";
+  }[] = [
+    { label: "Bring to front", dir: "front" },
+    { label: "Bring forward", dir: "forward" },
+    { label: "Send backward", dir: "backward" },
+    { label: "Send to back", dir: "back" },
+  ];
+
+  return (
+    <div ref={ref} className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        title="Layer"
+        aria-label="Layer order"
+        className="flex h-7 w-7 items-center justify-center rounded-full text-zinc-300 transition hover:bg-zinc-800 hover:text-zinc-100"
+      >
+        <svg viewBox="0 0 16 16" className="h-3.5 w-3.5" fill="currentColor">
+          <circle cx="4" cy="8" r="1.3" />
+          <circle cx="8" cy="8" r="1.3" />
+          <circle cx="12" cy="8" r="1.3" />
+        </svg>
+      </button>
+      {open && (
+        <div className="absolute left-1/2 top-full z-40 mt-2 w-40 -translate-x-1/2 overflow-hidden rounded-xl bg-zinc-900 py-1 shadow-2xl shadow-black/60 ring-1 ring-white/10 backdrop-blur">
+          {items.map((it) => (
+            <button
+              key={it.dir}
+              type="button"
+              onClick={() => {
+                onPick(it.dir);
+                setOpen(false);
+              }}
+              className="block w-full px-3 py-1.5 text-left text-xs text-zinc-200 transition hover:bg-zinc-800"
+            >
+              {it.label}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function isValidHex(v: string): boolean {
+  return /^#?([0-9a-fA-F]{6}|[0-9a-fA-F]{3})$/.test(v.trim());
+}
+function normalizeHex(v: string): string {
+  const t = v.trim();
+  return t.startsWith("#") ? t.toLowerCase() : `#${t.toLowerCase()}`;
+}
+
 function ColorBar({
   color,
   onChange,
@@ -1496,6 +1950,7 @@ function ColorBar({
   onChange: (c: string) => void;
 }) {
   const [open, setOpen] = useState(false);
+  const [hexDraft, setHexDraft] = useState("");
   const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -1506,6 +1961,21 @@ function ColorBar({
     document.addEventListener("mousedown", onDocClick);
     return () => document.removeEventListener("mousedown", onDocClick);
   }, [open]);
+
+  useEffect(() => {
+    if (open) {
+      setHexDraft(
+        color.startsWith("#") ? color : (COLORS[color] ?? "#" + color),
+      );
+    }
+  }, [open, color]);
+
+  function commitHex() {
+    if (isValidHex(hexDraft)) {
+      onChange(normalizeHex(hexDraft));
+      setOpen(false);
+    }
+  }
 
   return (
     <div ref={ref} className="relative">
@@ -1518,26 +1988,53 @@ function ColorBar({
         style={{ backgroundColor: COLORS[color] ?? color }}
       />
       {open && (
-        <div className="absolute left-0 top-full z-30 mt-2 grid grid-cols-6 gap-1 rounded-xl bg-zinc-900 p-2 shadow-2xl ring-1 ring-zinc-800">
-          {COLOR_NAMES.map((c) => (
-            <button
-              key={c}
-              type="button"
-              onClick={() => {
-                onChange(c);
-                setOpen(false);
+        <div className="absolute left-0 top-full z-30 mt-2 w-48 rounded-xl bg-zinc-900 p-2 shadow-2xl ring-1 ring-zinc-800">
+          <div className="grid grid-cols-6 gap-1">
+            {COLOR_NAMES.map((c) => (
+              <button
+                key={c}
+                type="button"
+                onClick={() => {
+                  onChange(c);
+                  setOpen(false);
+                }}
+                title={c}
+                aria-label={c}
+                className={
+                  "h-6 w-6 rounded-full ring-1 transition " +
+                  (color === c
+                    ? "ring-2 ring-cyan-400"
+                    : "ring-zinc-700 hover:ring-zinc-500")
+                }
+                style={{ backgroundColor: COLORS[c] }}
+              />
+            ))}
+          </div>
+          <div className="mt-2 flex items-center gap-1 border-t border-zinc-800 pt-2">
+            <span className="text-[10px] font-semibold uppercase tracking-wider text-zinc-500">
+              Hex
+            </span>
+            <input
+              value={hexDraft}
+              onChange={(e) => setHexDraft(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  commitHex();
+                }
               }}
-              title={c}
-              aria-label={c}
+              onBlur={commitHex}
+              placeholder="#22d3ee"
+              spellCheck={false}
+              suppressHydrationWarning
               className={
-                "h-6 w-6 rounded-full ring-1 transition " +
-                (color === c
-                  ? "ring-2 ring-cyan-400"
-                  : "ring-zinc-700 hover:ring-zinc-500")
+                "flex-1 rounded-md bg-zinc-950 px-2 py-1 font-mono text-[11px] text-zinc-100 ring-1 transition focus:outline-none focus:ring-2 focus:ring-cyan-400 " +
+                (isValidHex(hexDraft) || hexDraft === ""
+                  ? "ring-zinc-800"
+                  : "ring-rose-500/50")
               }
-              style={{ backgroundColor: COLORS[c] }}
             />
-          ))}
+          </div>
         </div>
       )}
     </div>
