@@ -146,6 +146,23 @@ export async function logoutAction(): Promise<void> {
   redirect("/login");
 }
 
+export async function recordLessonCompletionAction(
+  lessonId: number,
+): Promise<void> {
+  const session = await getSession();
+  if (!session) return;
+  if (!Number.isInteger(lessonId) || lessonId <= 0) return;
+  const lesson = await dbGet<{ id: number }>(
+    "SELECT id FROM lessons WHERE id = $1",
+    [lessonId],
+  );
+  if (!lesson) return;
+  await dbExec(
+    "INSERT INTO lesson_completions (user_id, lesson_id, completed_at) VALUES ($1, $2, $3)",
+    [session.userId, lessonId, Date.now()],
+  );
+}
+
 export async function createLessonAction(
   _prev: FormState,
   formData: FormData,

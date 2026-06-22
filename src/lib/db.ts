@@ -81,6 +81,17 @@ async function _init(): Promise<void> {
       created_at  BIGINT NOT NULL
     )
   `);
+  await sql(`
+    CREATE TABLE IF NOT EXISTS lesson_completions (
+      id           SERIAL PRIMARY KEY,
+      user_id      INTEGER NOT NULL,
+      lesson_id    INTEGER NOT NULL,
+      completed_at BIGINT NOT NULL
+    )
+  `);
+  await sql(
+    "CREATE INDEX IF NOT EXISTS lesson_completions_user_idx ON lesson_completions (user_id, completed_at DESC)",
+  );
   await ensureColumn("users", "role", "TEXT NOT NULL DEFAULT 'user'");
   await ensureColumn("lessons", "category_id", "INTEGER");
 }

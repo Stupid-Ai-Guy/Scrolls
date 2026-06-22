@@ -88,6 +88,14 @@ export default async function DashboardPage({
     [subject.id, grade],
   );
 
+  const completionRows = await dbAll<{ lesson_id: number; completed_at: number }>(
+    "SELECT lesson_id, completed_at FROM lesson_completions WHERE user_id = $1 ORDER BY completed_at DESC",
+    [session.userId],
+  );
+
+  const masteredCount = new Set(completionRows.map((r) => r.lesson_id)).size;
+  const streakCount = computeStreak(completionRows.map((r) => r.completed_at));
+
   const groups = groupLessonsByCategory(lessons, categoryRows);
   const isAdmin = session.role === "admin";
   const initial = session.email.charAt(0).toUpperCase();
@@ -264,13 +272,23 @@ export default async function DashboardPage({
           <aside className="space-y-3">
             <SidebarCard
               title="Daily streak"
-              value="0"
-              hint="Practice any skill to start your streak."
+              value={String(streakCount)}
+              hint={
+                streakCount === 0
+                  ? "Practice any skill to start your streak."
+                  : streakCount === 1
+                    ? "Keep going tomorrow to grow your streak."
+                    : `${streakCount} days in a row. Don't break the chain.`
+              }
             />
             <SidebarCard
               title="Skills mastered"
-              value="0"
-              hint="Mastery unlocks the next topic."
+              value={String(masteredCount)}
+              hint={
+                masteredCount === 0
+                  ? "Finish a lesson to master your first skill."
+                  : "Mastery unlocks the next topic."
+              }
             />
             <div className="rounded-2xl bg-gradient-to-br from-cyan-500/10 via-zinc-950 to-zinc-950 p-5 ring-1 ring-cyan-500/20">
               <p className="text-xs font-semibold uppercase tracking-[0.2em] text-cyan-300">
@@ -446,6 +464,35 @@ function CategorySections({
       ))}
     </div>
   );
+}
+
+function dayKey(ts: number): string {
+  const d = new Date(ts);
+  // UTC bucket — keeps the streak deterministic on the server. A future
+  // refinement could honor the learner's local timezone.
+  const y = d.getUTCFullYear();
+  const m = String(d.getUTCMonth() + 1).padStart(2, "0");
+  const day = String(d.getUTCDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+function computeStreak(completedAts: number[]): number {
+  if (completedAts.length === 0) return 0;
+  const days = new Set<string>();
+  for (const ts of completedAts) days.add(dayKey(ts));
+
+  const now = Date.now();
+  const today = dayKey(now);
+  const ONE_DAY = 24 * 60 * 60 * 1000;
+  // Start counting from today if there's activity today; otherwise from
+  // yesterday (so a streak survives until you miss a full day).
+  let cursor = days.has(today) ? now : now - ONE_DAY;
+  let streak = 0;
+  while (days.has(dayKey(cursor))) {
+    streak++;
+    cursor -= ONE_DAY;
+  }
+  return streak;
 }
 
 function SidebarCard({

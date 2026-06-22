@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type {
   Block,
   ImageBlock,
@@ -9,6 +9,7 @@ import type {
   QuestionBlock,
   TextBlock,
 } from "@/lib/lesson-content";
+import { recordLessonCompletionAction } from "@/lib/actions";
 import ScrollScriptRunner from "@/components/scrollscript-runner";
 import { SceneRunner } from "@/components/scene-editor";
 import {
@@ -76,6 +77,17 @@ export default function LessonPlayer({
   const atEnd = index >= total;
   const progressPct =
     total === 0 ? 100 : Math.round((Math.min(index, total) / total) * 100);
+
+  // Record a completion the first time the learner reaches the end of a
+  // non-empty lesson. Stays gated for the lifetime of this player instance
+  // so "Try again" → "complete" doesn't double-log.
+  const recordedRef = useRef(false);
+  useEffect(() => {
+    if (atEnd && total > 0 && !recordedRef.current) {
+      recordedRef.current = true;
+      recordLessonCompletionAction(lessonId).catch(() => {});
+    }
+  }, [atEnd, total, lessonId]);
 
   return (
     <div className="min-h-screen bg-black">
