@@ -2,7 +2,8 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import katex from "katex";
-import "katex/dist/katex.min.css";
+// KaTeX stylesheet is loaded by the root layout (src/app/layout.tsx) so
+// it's present on every page before this client component renders.
 import type { Scene, SceneShape } from "@/lib/lesson-content";
 
 const COLORS: Record<string, string> = {

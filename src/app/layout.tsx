@@ -1,6 +1,11 @@
 import type { Metadata } from "next";
 import { Inter } from "next/font/google";
 import "./globals.css";
+// KaTeX styles must load before any client component that calls
+// renderToString — without them the MathML accessibility node renders
+// alongside the HTML output (visible "duplication") and symbol fonts /
+// fraction layout / etc. are missing.
+import "katex/dist/katex.min.css";
 
 const inter = Inter({
   subsets: ["latin"],
