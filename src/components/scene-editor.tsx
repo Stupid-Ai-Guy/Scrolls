@@ -1175,6 +1175,15 @@ function renderShape(
     const labelColor = s.filled ? "#0a0a0a" : color;
     return (
       <g key={s.id} {...interact}>
+        {/* Invisible hit area — fill="transparent" counts as painted for
+            SVG hit-testing, so the entire interior + a few px of slop
+            around the stroke all capture clicks. */}
+        <circle
+          cx={toX(s.cx)}
+          cy={toY(s.cy)}
+          r={r + 8}
+          fill="transparent"
+        />
         <circle
           cx={toX(s.cx)}
           cy={toY(s.cy)}
@@ -1182,7 +1191,6 @@ function renderShape(
           fill={fillColor}
           stroke={selectionStroke ?? color}
           strokeWidth={isSelected ? "3" : "2"}
-          pointerEvents="all"
         />
         {s.label && (
           <text
@@ -1265,6 +1273,17 @@ function renderShape(
     const connOpacity = 0.45;
     return (
       <g key={s.id} {...interact}>
+        {/* Invisible hit area — fill="transparent" is treated as painted
+            so the entire bbox + small slop around the stroke captures
+            clicks even when the visible rect is unfilled. */}
+        <rect
+          x={toX(s.cx) - w / 2 - 6}
+          y={toY(s.cy) - h / 2 - 6}
+          width={w + 12}
+          height={h + 12}
+          fill="transparent"
+          rx="6"
+        />
         <rect
           x={toX(s.cx) - w / 2}
           y={toY(s.cy) - h / 2}
@@ -1274,7 +1293,6 @@ function renderShape(
           stroke={selectionStroke ?? color}
           strokeWidth={isSelected ? "3" : "2"}
           rx="4"
-          pointerEvents="all"
         />
         {s.label && (
           <text
