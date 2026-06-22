@@ -1836,6 +1836,36 @@ export function SceneEditor({
     setSelectedIds(newIds);
   }
 
+  // In-app clipboard for Ctrl/Cmd + C / V. Stored on a ref so copying
+  // doesn't trigger a re-render, and reset to offset 0 on every copy so
+  // repeated pastes after a single copy fan out instead of stacking on
+  // the same spot.
+  const clipboardRef = useRef<SceneShape[]>([]);
+  const pasteCountRef = useRef(0);
+
+  function copySelected() {
+    if (selectedIds.length === 0) return;
+    const ids = new Set(selectedIds);
+    clipboardRef.current = scene.shapes.filter((s) => ids.has(s.id));
+    pasteCountRef.current = 0;
+  }
+
+  function pasteFromClipboard() {
+    if (clipboardRef.current.length === 0) return;
+    snapshot();
+    pasteCountRef.current += 1;
+    const offset = 0.6 * pasteCountRef.current;
+    const newIds: string[] = [];
+    const additions: SceneShape[] = [];
+    for (const shape of clipboardRef.current) {
+      const newId = uid();
+      newIds.push(newId);
+      additions.push(copyShape(shape, newId, offset));
+    }
+    onChange({ ...scene, shapes: [...scene.shapes, ...additions] });
+    setSelectedIds(newIds);
+  }
+
   function removeShape(id: string) {
     const shape = scene.shapes.find((s) => s.id === id);
     if (!shape) return;
@@ -1980,6 +2010,34 @@ export function SceneEditor({
         if (selectedIds.length > 0) {
           e.preventDefault();
           duplicateSelected();
+        }
+        return;
+      }
+
+      // Cmd/Ctrl+C: copy selected shapes to the in-app clipboard
+      if (mod && e.key.toLowerCase() === "c") {
+        if (selectedIds.length > 0) {
+          e.preventDefault();
+          copySelected();
+        }
+        return;
+      }
+
+      // Cmd/Ctrl+V: paste from the in-app clipboard
+      if (mod && e.key.toLowerCase() === "v") {
+        if (clipboardRef.current.length > 0) {
+          e.preventDefault();
+          pasteFromClipboard();
+        }
+        return;
+      }
+
+      // Cmd/Ctrl+X: cut = copy + remove
+      if (mod && e.key.toLowerCase() === "x") {
+        if (selectedIds.length > 0) {
+          e.preventDefault();
+          copySelected();
+          removeSelected();
         }
         return;
       }
