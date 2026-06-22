@@ -74,6 +74,14 @@ export type SceneShape =
     }
   | {
       id: string;
+      kind: "latex";
+      x: number;
+      y: number;
+      code: string;
+      color: string;
+    }
+  | {
+      id: string;
       kind: "button";
       cx: number;
       cy: number;

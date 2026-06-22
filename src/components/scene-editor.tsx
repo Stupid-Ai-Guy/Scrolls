@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import katex from "katex";
+import "katex/dist/katex.min.css";
 import type { Scene, SceneShape } from "@/lib/lesson-content";
 
 const COLORS: Record<string, string> = {
@@ -32,6 +34,15 @@ function uid() {
 
 function round(n: number): number {
   return Math.round(n * 10) / 10;
+}
+
+function escapeHtml(s: string): string {
+  return s
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
 }
 
 function makeShape(kind: SceneShape["kind"], wx: number, wy: number): SceneShape {
@@ -83,6 +94,15 @@ function makeShape(kind: SceneShape["kind"], wx: number, wy: number): SceneShape
       };
     case "text":
       return { id, kind, x: round(wx), y: round(wy), text: "Text", color: "slate" };
+    case "latex":
+      return {
+        id,
+        kind,
+        x: round(wx),
+        y: round(wy),
+        code: "x^2 + y^2 = r^2",
+        color: "slate",
+      };
     case "button":
       return {
         id,
@@ -179,6 +199,24 @@ function TextIcon() {
         fontFamily="ui-sans-serif, system-ui"
       >
         T
+      </text>
+    </svg>
+  );
+}
+
+function LatexIcon() {
+  return (
+    <svg viewBox="0 0 24 24" className="h-5 w-5" fill="currentColor">
+      <text
+        x="12"
+        y="18"
+        textAnchor="middle"
+        fontSize="11"
+        fontWeight="800"
+        fontFamily="'Computer Modern', 'Latin Modern Math', Cambria, Georgia, serif"
+        fontStyle="italic"
+      >
+        TeX
       </text>
     </svg>
   );
@@ -287,6 +325,7 @@ type RendererProps = {
   scene: Scene;
   selectedId?: string;
   selectedIds?: string[];
+  editingLatexId?: string;
   clickedButtonId?: string;
   activeTool?: ActiveTool;
   spacePan?: boolean;
@@ -308,7 +347,8 @@ type RendererProps = {
 };
 
 function shapeTopAnchor(s: SceneShape): { x: number; y: number } {
-  if (s.kind === "point" || s.kind === "text") return { x: s.x, y: s.y };
+  if (s.kind === "point" || s.kind === "text" || s.kind === "latex")
+    return { x: s.x, y: s.y };
   if (s.kind === "line")
     return { x: (s.x1 + s.x2) / 2, y: Math.max(s.y1, s.y2) };
   if (s.kind === "polyline") {
@@ -326,7 +366,7 @@ function shapeBBox(s: SceneShape): {
   maxX: number;
   maxY: number;
 } {
-  if (s.kind === "point" || s.kind === "text") {
+  if (s.kind === "point" || s.kind === "text" || s.kind === "latex") {
     return { minX: s.x, minY: s.y, maxX: s.x, maxY: s.y };
   }
   if (s.kind === "line") {
@@ -367,6 +407,7 @@ function SceneCanvas({
   scene,
   selectedId,
   selectedIds,
+  editingLatexId,
   clickedButtonId,
   activeTool = "select",
   spacePan = false,
@@ -917,6 +958,7 @@ function SceneCanvas({
           renderShape(s, toX, toY, dx, {
             selectedId,
             selectedIds: selectedSet,
+            editingLatexId,
             clickedButtonId,
             showConnectionPoints:
               activeTool === "line" || activeTool === "polyline",
@@ -968,7 +1010,7 @@ function SceneCanvas({
 }
 
 function movePatch(s: SceneShape, dxw: number, dyw: number): Partial<SceneShape> {
-  if (s.kind === "point" || s.kind === "text") {
+  if (s.kind === "point" || s.kind === "text" || s.kind === "latex") {
     return { x: round(s.x + dxw), y: round(s.y + dyw) };
   }
   if (s.kind === "line") {
@@ -1147,6 +1189,7 @@ function renderShape(
   ctx: {
     selectedId?: string;
     selectedIds?: Set<string>;
+    editingLatexId?: string;
     clickedButtonId?: string;
     showConnectionPoints?: boolean;
     onClick?: (buttonId: string) => void;
@@ -1360,6 +1403,106 @@ function renderShape(
       </g>
     );
   }
+  if (s.kind === "latex") {
+    const isEditing = ctx.editingLatexId === s.id;
+    const fW = 240;
+    const fH = 60;
+    if (isEditing) {
+      // While the user is editing the code in the ContextBar input, show
+      // the raw LaTeX source on the canvas as monospace text.
+      return (
+        <g key={s.id} {...interact}>
+          <rect
+            x={toX(s.x) - fW / 2}
+            y={toY(s.y) - fH / 2}
+            width={fW}
+            height={fH}
+            fill="transparent"
+          />
+          {isSelected && (
+            <rect
+              x={toX(s.x) - fW / 2}
+              y={toY(s.y) - fH / 2}
+              width={fW}
+              height={fH}
+              fill="none"
+              stroke="#22d3ee"
+              strokeWidth="2"
+              strokeDasharray="4 2"
+              pointerEvents="none"
+            />
+          )}
+          <text
+            x={toX(s.x)}
+            y={toY(s.y) + 5}
+            fill={color}
+            fontSize="13"
+            fontFamily="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace"
+            fontWeight="500"
+            textAnchor="middle"
+            pointerEvents="none"
+          >
+            {s.code || "\\text{LaTeX}"}
+          </text>
+        </g>
+      );
+    }
+    let html = "";
+    try {
+      html = katex.renderToString(s.code || " ", {
+        throwOnError: false,
+        displayMode: false,
+        output: "html",
+      });
+    } catch {
+      html = `<span style="color:#fb7185">${escapeHtml(s.code)}</span>`;
+    }
+    return (
+      <g key={s.id} {...interact}>
+        <rect
+          x={toX(s.x) - fW / 2}
+          y={toY(s.y) - fH / 2}
+          width={fW}
+          height={fH}
+          fill="transparent"
+        />
+        <foreignObject
+          x={toX(s.x) - fW / 2}
+          y={toY(s.y) - fH / 2}
+          width={fW}
+          height={fH}
+          pointerEvents="none"
+        >
+          <div
+            style={{
+              width: "100%",
+              height: "100%",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              color,
+              fontSize: 18,
+              lineHeight: 1.2,
+            }}
+            dangerouslySetInnerHTML={{ __html: html }}
+          />
+        </foreignObject>
+        {isSelected && (
+          <rect
+            x={toX(s.x) - fW / 2}
+            y={toY(s.y) - fH / 2}
+            width={fW}
+            height={fH}
+            fill="none"
+            stroke="#22d3ee"
+            strokeWidth="2"
+            strokeDasharray="4 2"
+            pointerEvents="none"
+          />
+        )}
+      </g>
+    );
+  }
   if (s.kind === "button") {
     const w = (s.w / dx) * W;
     const h = (s.h / dx) * W;
@@ -1521,6 +1664,18 @@ export function SceneEditor({
   const [activeTool, setActiveTool] = useState<ActiveTool>("select");
   const [boundsOpen, setBoundsOpen] = useState(false);
   const [spacePan, setSpacePan] = useState(false);
+  // ID of the latex shape whose code input is currently focused in the
+  // ContextBar. While set, the canvas shows the raw LaTeX source for that
+  // shape. When the input blurs (user clicks out), this clears and the
+  // canvas flips back to the rendered version.
+  const [editingLatexId, setEditingLatexId] = useState<string | null>(null);
+
+  const selectedId_ = selectedIds.length === 1 ? selectedIds[0] : null;
+  useEffect(() => {
+    if (editingLatexId && editingLatexId !== selectedId_) {
+      setEditingLatexId(null);
+    }
+  }, [selectedId_, editingLatexId]);
 
   const selectedId = selectedIds.length === 1 ? selectedIds[0] : null;
 
@@ -1605,7 +1760,11 @@ export function SceneEditor({
   }
 
   function copyShape(shape: SceneShape, newId: string, offset: number): SceneShape {
-    if (shape.kind === "point" || shape.kind === "text") {
+    if (
+      shape.kind === "point" ||
+      shape.kind === "text" ||
+      shape.kind === "latex"
+    ) {
       return {
         ...shape,
         id: newId,
@@ -1888,6 +2047,8 @@ export function SceneEditor({
               snapshot();
               onChange({ ...scene, correctButtonId: buttonId });
             }}
+            onLatexFocus={() => selected && setEditingLatexId(selected.id)}
+            onLatexBlur={() => setEditingLatexId(null)}
           />
         </div>
 
@@ -1895,6 +2056,7 @@ export function SceneEditor({
           scene={scene}
           selectedId={selectedId ?? undefined}
           selectedIds={selectedIds}
+          editingLatexId={editingLatexId ?? undefined}
           activeTool={activeTool}
           spacePan={spacePan}
           onSelect={(id, opts) => {
@@ -1940,7 +2102,9 @@ const TOOL_COLORS = {
   lines: { idle: "text-sky-300", active: "bg-sky-500/15 text-sky-200" },
   line: { idle: "text-sky-300", active: "bg-sky-500/15 text-sky-200" },
   polyline: { idle: "text-sky-300", active: "bg-sky-500/15 text-sky-200" },
+  texts: { idle: "text-violet-300", active: "bg-violet-500/15 text-violet-200" },
   text: { idle: "text-violet-300", active: "bg-violet-500/15 text-violet-200" },
+  latex: { idle: "text-violet-300", active: "bg-violet-500/15 text-violet-200" },
   button: { idle: "text-amber-300", active: "bg-amber-500/15 text-amber-200" },
   canvas: { idle: "text-zinc-400", active: "bg-zinc-700/40 text-zinc-100" },
 };
@@ -1958,13 +2122,16 @@ function Sidebar({
 }) {
   const [shapesOpen, setShapesOpen] = useState(false);
   const [linesOpen, setLinesOpen] = useState(false);
+  const [textsOpen, setTextsOpen] = useState(false);
   const shapesFlyoutRef = useRef<HTMLDivElement>(null);
   const shapesAnchorRef = useRef<HTMLButtonElement>(null);
   const linesFlyoutRef = useRef<HTMLDivElement>(null);
   const linesAnchorRef = useRef<HTMLButtonElement>(null);
+  const textsFlyoutRef = useRef<HTMLDivElement>(null);
+  const textsAnchorRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
-    if (!shapesOpen && !linesOpen) return;
+    if (!shapesOpen && !linesOpen && !textsOpen) return;
     function onDocClick(e: MouseEvent) {
       const target = e.target as Node;
       if (
@@ -1979,16 +2146,24 @@ function Sidebar({
       ) {
         return;
       }
+      if (
+        textsFlyoutRef.current?.contains(target) ||
+        textsAnchorRef.current?.contains(target)
+      ) {
+        return;
+      }
       setShapesOpen(false);
       setLinesOpen(false);
+      setTextsOpen(false);
     }
     document.addEventListener("mousedown", onDocClick);
     return () => document.removeEventListener("mousedown", onDocClick);
-  }, [shapesOpen, linesOpen]);
+  }, [shapesOpen, linesOpen, textsOpen]);
 
   const shapeActive =
     activeTool === "point" || activeTool === "circle" || activeTool === "rect";
   const lineActive = activeTool === "line" || activeTool === "polyline";
+  const textActive = activeTool === "text" || activeTool === "latex";
 
   return (
     <div className="relative flex flex-col gap-1 rounded-2xl bg-zinc-900/95 p-1.5 shadow-2xl shadow-black/60 ring-1 ring-white/5 backdrop-blur">
@@ -2094,14 +2269,46 @@ function Sidebar({
         )}
       </div>
 
-      <ToolButton
-        label="Text"
-        active={activeTool === "text"}
-        tone={TOOL_COLORS.text}
-        onClick={() => onSelectTool("text")}
-      >
-        <TextIcon />
-      </ToolButton>
+      <div className="relative">
+        <ToolButton
+          label="Text"
+          active={textActive || textsOpen}
+          tone={TOOL_COLORS.texts}
+          onClick={() => setTextsOpen((v) => !v)}
+          buttonRef={textsAnchorRef}
+        >
+          <TextIcon />
+        </ToolButton>
+        {textsOpen && (
+          <div
+            ref={textsFlyoutRef}
+            className="absolute left-full top-0 z-20 ml-2 flex flex-col gap-1 rounded-2xl bg-zinc-900 p-2 shadow-2xl ring-1 ring-zinc-800"
+          >
+            <FlyoutItem
+              label="Text"
+              onClick={() => {
+                onSelectTool("text");
+                setTextsOpen(false);
+              }}
+              tone={TOOL_COLORS.text}
+              active={activeTool === "text"}
+            >
+              <TextIcon />
+            </FlyoutItem>
+            <FlyoutItem
+              label="LaTeX"
+              onClick={() => {
+                onSelectTool("latex");
+                setTextsOpen(false);
+              }}
+              tone={TOOL_COLORS.latex}
+              active={activeTool === "latex"}
+            >
+              <LatexIcon />
+            </FlyoutItem>
+          </div>
+        )}
+      </div>
 
       <ToolButton
         label="Button"
@@ -2211,6 +2418,8 @@ function ContextBar({
   onRemove,
   onMultiRemove,
   onSetCorrect,
+  onLatexFocus,
+  onLatexBlur,
 }: {
   selected: SceneShape | null;
   multiCount?: number;
@@ -2221,6 +2430,8 @@ function ContextBar({
   onRemove: () => void;
   onMultiRemove?: () => void;
   onSetCorrect: (id: string | undefined) => void;
+  onLatexFocus?: () => void;
+  onLatexBlur?: () => void;
 }) {
   if (!selected && multiCount > 1) {
     return (
@@ -2337,6 +2548,24 @@ function ContextBar({
             placeholder="Text"
             suppressHydrationWarning
             className={`${inputCls} w-40`}
+          />
+        </>
+      )}
+      {selected.kind === "latex" && (
+        <>
+          <Sep />
+          <input
+            value={selected.code}
+            onFocus={() => {
+              onBeginEdit?.();
+              onLatexFocus?.();
+            }}
+            onBlur={() => onLatexBlur?.()}
+            onChange={(e) => onUpdate({ code: e.target.value })}
+            placeholder="x^2 + y^2 = r^2"
+            spellCheck={false}
+            suppressHydrationWarning
+            className={`${inputCls} w-56 font-mono`}
           />
         </>
       )}
