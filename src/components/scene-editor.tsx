@@ -645,14 +645,16 @@ function SceneCanvas({
         const maxX = Math.max(d.startWX, d.currentWX);
         const minY = Math.min(d.startWY, d.currentWY);
         const maxY = Math.max(d.startWY, d.currentWY);
+        // AABB intersection — any overlap with the marquee counts. More
+        // forgiving than requiring the shape to be fully enclosed.
         const ids = scene.shapes
           .filter((s) => {
             const b = shapeBBox(s);
             return (
-              b.minX >= minX &&
-              b.maxX <= maxX &&
-              b.minY >= minY &&
-              b.maxY <= maxY
+              b.maxX >= minX &&
+              b.minX <= maxX &&
+              b.maxY >= minY &&
+              b.minY <= maxY
             );
           })
           .map((s) => s.id);
@@ -1180,6 +1182,7 @@ function renderShape(
           fill={fillColor}
           stroke={selectionStroke ?? color}
           strokeWidth={isSelected ? "3" : "2"}
+          pointerEvents="all"
         />
         {s.label && (
           <text
@@ -1200,6 +1203,17 @@ function renderShape(
   if (s.kind === "line") {
     return (
       <g key={s.id} {...interact}>
+        {/* fat invisible hit area so the line is easy to grab */}
+        <line
+          x1={toX(s.x1)}
+          y1={toY(s.y1)}
+          x2={toX(s.x2)}
+          y2={toY(s.y2)}
+          stroke="transparent"
+          strokeWidth="14"
+          strokeLinecap="round"
+          pointerEvents="stroke"
+        />
         <line
           x1={toX(s.x1)}
           y1={toY(s.y1)}
@@ -1208,6 +1222,7 @@ function renderShape(
           stroke={selectionStroke ?? color}
           strokeWidth={isSelected ? "4" : "2.5"}
           strokeLinecap="round"
+          pointerEvents="none"
         />
       </g>
     );
@@ -1216,6 +1231,16 @@ function renderShape(
     const points = s.vertices.map((v) => `${toX(v.x)},${toY(v.y)}`).join(" ");
     return (
       <g key={s.id} {...interact}>
+        {/* fat invisible hit area */}
+        <polyline
+          points={points}
+          fill="none"
+          stroke="transparent"
+          strokeWidth="14"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          pointerEvents="stroke"
+        />
         <polyline
           points={points}
           fill="none"
@@ -1223,6 +1248,7 @@ function renderShape(
           strokeWidth={isSelected ? "4" : "2.5"}
           strokeLinecap="round"
           strokeLinejoin="round"
+          pointerEvents="none"
         />
       </g>
     );
@@ -1248,6 +1274,7 @@ function renderShape(
           stroke={selectionStroke ?? color}
           strokeWidth={isSelected ? "3" : "2"}
           rx="4"
+          pointerEvents="all"
         />
         {s.label && (
           <text
