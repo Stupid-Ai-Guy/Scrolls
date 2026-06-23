@@ -51,6 +51,15 @@ const SUBJECTS: ReadonlyArray<{
     accentText: "text-sky-300",
     accentBorder: "border-sky-400",
   },
+  {
+    id: "calculus",
+    label: "Calculus",
+    tagline: "Master limits, derivatives, and integrals — one idea at a time.",
+    glow: "from-violet-500/10",
+    pill: "bg-violet-500/10 text-violet-300 ring-1 ring-violet-500/30",
+    accentText: "text-violet-300",
+    accentBorder: "border-violet-400",
+  },
 ];
 
 const GRADE_OPTIONS: ReadonlyArray<{ value: number; label: string }> = [
@@ -63,6 +72,10 @@ const GRADE_OPTIONS: ReadonlyArray<{ value: number; label: string }> = [
   { value: 6, label: "6" },
   { value: 7, label: "7" },
   { value: 8, label: "8" },
+  { value: 9, label: "9" },
+  { value: 10, label: "10" },
+  { value: 11, label: "11" },
+  { value: 12, label: "12" },
 ];
 
 export default async function DashboardPage({

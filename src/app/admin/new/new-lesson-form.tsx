@@ -67,6 +67,7 @@ export default function NewLessonForm({
             <option value="math">Math</option>
             <option value="language">Language</option>
             <option value="science">Science</option>
+            <option value="calculus">Calculus</option>
           </select>
         </div>
 
@@ -89,7 +90,7 @@ export default function NewLessonForm({
             className={fieldClass}
           >
             <option value="K">Kindergarten</option>
-            {[1, 2, 3, 4, 5, 6, 7, 8].map((g) => (
+            {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].map((g) => (
               <option key={g} value={String(g)}>
                 Grade {g}
               </option>

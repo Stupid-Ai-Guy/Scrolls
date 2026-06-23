@@ -19,7 +19,7 @@ import {
 } from "@/components/scene-editor";
 import type { Scene } from "@/lib/lesson-content";
 
-type SubjectId = "math" | "language" | "science";
+type SubjectId = "math" | "language" | "science" | "calculus";
 type EditorBlock = Block & { _key: string };
 
 const fieldClass =
@@ -248,6 +248,7 @@ export default function LessonEditor({
                 <option value="math">Math</option>
                 <option value="language">Language</option>
                 <option value="science">Science</option>
+                <option value="calculus">Calculus</option>
               </select>
             </div>
             <div>
@@ -261,7 +262,7 @@ export default function LessonEditor({
                 className={`mt-1 ${fieldClass}`}
               >
                 <option value="0">Kindergarten</option>
-                {[1, 2, 3, 4, 5, 6, 7, 8].map((g) => (
+                {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].map((g) => (
                   <option key={g} value={String(g)}>
                     Grade {g}
                   </option>
