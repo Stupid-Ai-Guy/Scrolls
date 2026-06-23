@@ -38,8 +38,7 @@ export default async function LessonEditorPage({
       initialSubject={
         lesson.subject === "math" ||
         lesson.subject === "language" ||
-        lesson.subject === "science" ||
-        lesson.subject === "calculus"
+        lesson.subject === "science"
           ? lesson.subject
           : "math"
       }

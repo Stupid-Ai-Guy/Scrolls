@@ -205,6 +205,26 @@ function TextIcon() {
   );
 }
 
+function ViewportIcon() {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      className="h-5 w-5"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      {/* corner brackets — like a camera viewfinder */}
+      <path d="M4 8 V4 H8" />
+      <path d="M20 8 V4 H16" />
+      <path d="M4 16 V20 H8" />
+      <path d="M20 16 V20 H16" />
+    </svg>
+  );
+}
+
 function LatexIcon() {
   return (
     <svg viewBox="0 0 24 24" className="h-5 w-5" fill="currentColor">
@@ -316,11 +336,18 @@ type DragState =
       currentWX: number;
       currentWY: number;
       shiftKey: boolean;
+    }
+  | {
+      type: "viewport";
+      startWX: number;
+      startWY: number;
+      currentWX: number;
+      currentWY: number;
     };
 
 // ---------------- Canvas ----------------
 
-type ActiveTool = "select" | SceneShape["kind"];
+type ActiveTool = "select" | "viewport" | SceneShape["kind"];
 
 type RendererProps = {
   scene: Scene;
@@ -337,6 +364,8 @@ type RendererProps = {
     updates: { id: string; patch: Partial<SceneShape> }[],
   ) => void;
   onPlaceShape?: (kind: SceneShape["kind"], wx: number, wy: number) => void;
+  onSetView?: (view: { xmin: number; xmax: number; ymin: number; ymax: number }) => void;
+  onCommitTool?: (tool: ActiveTool) => void;
   onClickButton?: (buttonId: string) => void;
   onDuplicateShape?: (id: string) => void;
   onRemoveShape?: (id: string) => void;
@@ -417,6 +446,8 @@ function SceneCanvas({
   onUpdateShape,
   onUpdateShapes,
   onPlaceShape,
+  onSetView,
+  onCommitTool,
   onClickButton,
   onDuplicateShape,
   onRemoveShape,
@@ -642,7 +673,7 @@ function SceneCanvas({
     if (!d) return;
     const [wx, wy] = svgToWorld(e.clientX, e.clientY);
 
-    if (d.type === "marquee") {
+    if (d.type === "marquee" || d.type === "viewport") {
       if (
         Math.abs(wx - d.currentWX) < 0.01 &&
         Math.abs(wy - d.currentWY) < 0.01
@@ -681,6 +712,22 @@ function SceneCanvas({
 
   function handleMouseUp() {
     const d = dragRef.current;
+    if (d?.type === "viewport") {
+      if (movedRef.current && onSetView) {
+        const xmin = Math.min(d.startWX, d.currentWX);
+        const xmax = Math.max(d.startWX, d.currentWX);
+        const ymin = Math.min(d.startWY, d.currentWY);
+        const ymax = Math.max(d.startWY, d.currentWY);
+        // Guard against degenerate rectangles.
+        if (xmax - xmin > 0.5 && ymax - ymin > 0.5) {
+          onSetView({ xmin, xmax, ymin, ymax });
+          setView({ zoom: 1, panX: 0, panY: 0 });
+          onCommitTool?.("select");
+        }
+      }
+      dragRef.current = null;
+      return;
+    }
     if (d?.type === "marquee") {
       if (movedRef.current) {
         const minX = Math.min(d.startWX, d.currentWX);
@@ -725,11 +772,16 @@ function SceneCanvas({
       return;
     }
     if (spacePan) return;
-    if (activeTool !== "select" && onPlaceShape) {
+    if (
+      activeTool !== "select" &&
+      activeTool !== "viewport" &&
+      onPlaceShape
+    ) {
       const [wx, wy] = svgToWorld(e.clientX, e.clientY);
       onPlaceShape(activeTool, wx, wy);
       return;
     }
+    if (activeTool === "viewport") return;
     if (e.shiftKey) return;
     onSelect?.(null);
   }
@@ -753,6 +805,19 @@ function SceneCanvas({
         currentWX: wx,
         currentWY: wy,
         shiftKey: e.shiftKey,
+      };
+      movedRef.current = false;
+      return;
+    }
+    // Viewport tool: drag a rect that becomes the new scene.view.
+    if (activeTool === "viewport" && onSetView) {
+      const [wx, wy] = svgToWorld(e.clientX, e.clientY);
+      dragRef.current = {
+        type: "viewport",
+        startWX: wx,
+        startWY: wy,
+        currentWX: wx,
+        currentWY: wy,
       };
       movedRef.current = false;
     }
@@ -983,23 +1048,26 @@ function SceneCanvas({
               renderHandles(s, toX, toY, (e, h) => beginResize(e, s, h)),
             )}
 
-        {dragRef.current?.type === "marquee" &&
+        {(dragRef.current?.type === "marquee" ||
+          dragRef.current?.type === "viewport") &&
           (() => {
             const d = dragRef.current;
             const x1 = toX(d.startWX);
             const x2 = toX(d.currentWX);
             const y1 = toY(d.startWY);
             const y2 = toY(d.currentWY);
+            const isViewport = d.type === "viewport";
+            const accent = isViewport ? "#f59e0b" : "#22d3ee";
             return (
               <rect
                 x={Math.min(x1, x2)}
                 y={Math.min(y1, y2)}
                 width={Math.abs(x2 - x1)}
                 height={Math.abs(y2 - y1)}
-                fill="#22d3ee"
-                fillOpacity="0.08"
-                stroke="#22d3ee"
-                strokeWidth="1.5"
+                fill={accent}
+                fillOpacity={isViewport ? "0.1" : "0.08"}
+                stroke={accent}
+                strokeWidth={isViewport ? "2" : "1.5"}
                 strokeDasharray="4 3"
                 pointerEvents="none"
               />
@@ -2137,6 +2205,11 @@ export function SceneEditor({
           onUpdateShape={updateShape}
           onUpdateShapes={updateShapes}
           onPlaceShape={placeShape}
+          onSetView={(view) => {
+            snapshot();
+            onChange({ ...scene, view });
+          }}
+          onCommitTool={(t) => setActiveTool(t)}
           onDuplicateShape={duplicateShape}
           onRemoveShape={removeShape}
           onBeginEdit={snapshot}
@@ -2165,6 +2238,7 @@ const TOOL_COLORS = {
   text: { idle: "text-violet-300", active: "bg-violet-500/15 text-violet-200" },
   latex: { idle: "text-violet-300", active: "bg-violet-500/15 text-violet-200" },
   button: { idle: "text-amber-300", active: "bg-amber-500/15 text-amber-200" },
+  viewport: { idle: "text-amber-300", active: "bg-amber-500/15 text-amber-200" },
   canvas: { idle: "text-zinc-400", active: "bg-zinc-700/40 text-zinc-100" },
 };
 
@@ -2376,6 +2450,15 @@ function Sidebar({
         onClick={() => onSelectTool("button")}
       >
         <ButtonIcon />
+      </ToolButton>
+
+      <ToolButton
+        label="Viewport — drag a rect to set the preview frame"
+        active={activeTool === "viewport"}
+        tone={TOOL_COLORS.viewport}
+        onClick={() => onSelectTool("viewport")}
+      >
+        <ViewportIcon />
       </ToolButton>
 
       <div className="mt-1 border-t border-zinc-800 pt-1">

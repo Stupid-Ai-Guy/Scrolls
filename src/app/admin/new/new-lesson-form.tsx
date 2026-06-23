@@ -67,7 +67,6 @@ export default function NewLessonForm({
             <option value="math">Math</option>
             <option value="language">Language</option>
             <option value="science">Science</option>
-            <option value="calculus">Calculus</option>
           </select>
         </div>
 
@@ -95,6 +94,9 @@ export default function NewLessonForm({
                 Grade {g}
               </option>
             ))}
+            {subject === "math" && (
+              <option value="13">Calculus</option>
+            )}
           </select>
         </div>
       </div>

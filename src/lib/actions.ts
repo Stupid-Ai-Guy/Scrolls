@@ -11,10 +11,10 @@ export type FormState = { error?: string; ok?: boolean };
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const MASTER_PASSWORD = process.env.ADMIN_PASSWORD ?? "";
 
-const ALLOWED_SUBJECTS = ["math", "language", "science", "calculus"] as const;
+const ALLOWED_SUBJECTS = ["math", "language", "science"] as const;
 type Subject = (typeof ALLOWED_SUBJECTS)[number];
 
-const MAX_GRADE = 12;
+const MAX_GRADE = 13; // 13 = Calculus
 
 function normalizeSubject(raw: string): Subject {
   return (ALLOWED_SUBJECTS as readonly string[]).includes(raw)
@@ -23,7 +23,9 @@ function normalizeSubject(raw: string): Subject {
 }
 
 function normalizeGrade(raw: string): number {
-  if (raw.toUpperCase() === "K") return 0;
+  const upper = raw.toUpperCase();
+  if (upper === "K") return 0;
+  if (upper === "CALC" || upper === "CALCULUS") return 13;
   const n = parseInt(raw, 10);
   return Number.isInteger(n) && n >= 0 && n <= MAX_GRADE ? n : 1;
 }

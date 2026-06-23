@@ -51,15 +51,6 @@ const SUBJECTS: ReadonlyArray<{
     accentText: "text-sky-300",
     accentBorder: "border-sky-400",
   },
-  {
-    id: "calculus",
-    label: "Calculus",
-    tagline: "Master limits, derivatives, and integrals — one idea at a time.",
-    glow: "from-violet-500/10",
-    pill: "bg-violet-500/10 text-violet-300 ring-1 ring-violet-500/30",
-    accentText: "text-violet-300",
-    accentBorder: "border-violet-400",
-  },
 ];
 
 const GRADE_OPTIONS: ReadonlyArray<{ value: number; label: string }> = [
@@ -76,6 +67,9 @@ const GRADE_OPTIONS: ReadonlyArray<{ value: number; label: string }> = [
   { value: 10, label: "10" },
   { value: 11, label: "11" },
   { value: 12, label: "12" },
+  // Calculus is a math-only "extra" level. Filtered out for other subjects
+  // in the render below.
+  { value: 13, label: "Calc" },
 ];
 
 export default async function DashboardPage({
@@ -214,7 +208,9 @@ export default async function DashboardPage({
           </p>
 
           <div className="mt-8 flex flex-wrap items-center gap-1.5">
-            {GRADE_OPTIONS.map((g) => {
+            {GRADE_OPTIONS.filter(
+              (g) => g.value !== 13 || subject.id === "math",
+            ).map((g) => {
               const active = g.value === grade;
               return (
                 <Link
