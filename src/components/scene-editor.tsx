@@ -1700,10 +1700,14 @@ function renderShape(
     const zeroYPx = xmin <= 0 && 0 <= xmax ? fnX(0) : null;
 
     const clipId = `fnclip-${s.id}`;
-    const labelW = boxWPx;
-    const labelH = 28;
-    const labelXPx = boxLeftPx;
-    const labelYPx = boxTopPx - labelH - 4;
+    // Equation pill sits below the box, capsule-shaped, amber background,
+    // dark text. Width tracks the box but stays within reasonable bounds so
+    // a tiny box still gets a usable pill and a wide box doesn't get an
+    // absurdly long one.
+    const labelH = 24;
+    const labelW = Math.max(110, Math.min(boxWPx * 0.75, 280));
+    const labelXPx = boxLeftPx + (boxWPx - labelW) / 2;
+    const labelYPx = boxBottomPx + 6;
 
     return (
       <g key={s.id} {...interact}>
@@ -1782,13 +1786,23 @@ function renderShape(
             ⚠ invalid expression
           </text>
         )}
-        {/* Label above the box: monospace LaTeX source while editing, else
-            KaTeX-rendered y = <expr>. */}
+        {/* Equation pill below the box: amber capsule with dark text.
+            Monospace raw LaTeX while editing, KaTeX-rendered otherwise. */}
+        <rect
+          x={labelXPx}
+          y={labelYPx}
+          width={labelW}
+          height={labelH}
+          fill="#fbbf24"
+          rx={labelH / 2}
+          ry={labelH / 2}
+          pointerEvents="none"
+        />
         {isEditing && (
           <text
             x={labelXPx + labelW / 2}
             y={labelYPx + labelH / 2 + 4}
-            fill={color}
+            fill="#18181b"
             fontSize="13"
             fontFamily="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace"
             textAnchor="middle"
@@ -1812,7 +1826,7 @@ function renderShape(
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "center",
-                color,
+                color: "#18181b",
                 fontSize: 14,
                 lineHeight: 1.2,
               }}
