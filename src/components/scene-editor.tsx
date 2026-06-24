@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import katex from "katex";
+import { ComputeEngine } from "@cortex-js/compute-engine";
 // KaTeX stylesheet is loaded by the root layout (src/app/layout.tsx) so
 // it's present on every page before this client component renders.
 import type { Scene, SceneShape } from "@/lib/lesson-content";
@@ -46,318 +47,52 @@ function escapeHtml(s: string): string {
     .replace(/'/g, "&#039;");
 }
 
-// ---------------- LaTeX → JS expression compiler ----------------
-// Delegates parsing to KaTeX (`katex.__parse`), which already handles every
-// LaTeX command we care about — `\frac`, `\sqrt`, `\sin`, `\sum`, Greek
-// letters, etc. — so we don't maintain a per-command regex table. The
-// resulting AST is walked once and emitted as a JS expression that
-// `new Function` evaluates. Math.* is injected as named params (no globals,
-// no `with`); after emission the only characters allowed are the safe set
-// in FN_ALLOWED_RE so anything KaTeX accepts but we can't translate gets
-// rejected at compile time.
-const FN_MATH_NAMES = [
-  "PI", "E",
-  "sin", "cos", "tan", "asin", "acos", "atan", "atan2",
-  "sinh", "cosh", "tanh", "sec", "csc", "cot",
-  "sqrt", "cbrt", "exp", "log", "log10", "log2",
-  "abs", "sign", "floor", "ceil", "round", "max", "min", "pow",
-] as const;
-const FN_MATH_VALUES: unknown[] = [
-  Math.PI, Math.E,
-  Math.sin, Math.cos, Math.tan,
-  Math.asin, Math.acos, Math.atan, Math.atan2,
-  Math.sinh, Math.cosh, Math.tanh,
-  (x: number) => 1 / Math.cos(x),
-  (x: number) => 1 / Math.sin(x),
-  (x: number) => 1 / Math.tan(x),
-  Math.sqrt, Math.cbrt, Math.exp,
-  Math.log, Math.log10, Math.log2,
-  Math.abs, Math.sign, Math.floor, Math.ceil, Math.round,
-  Math.max, Math.min, Math.pow,
-];
-const FN_MATH_SET = new Set<string>(FN_MATH_NAMES);
-const FN_ALLOWED_RE = /^[a-zA-Z0-9_+\-*/%().,\s]*$/;
+// ---------------- LaTeX function-expression evaluator ----------------
+// Cortex Compute Engine parses LaTeX natively and knows every math command
+// without us listing any (\sin, \frac, \sqrt, \pi, \binom, |x|, ...). For
+// each sample point we substitute x and ask for a numeric value; valueOf()
+// returns a JS number when the result is real, or a string for symbolic /
+// complex / infinity outputs (which we treat as a gap in the curve).
+const ce = new ComputeEngine();
 const fnCache = new Map<string, ((x: number) => number) | null>();
-
-// LaTeX op (`\sin`, `\log`, ...) → JS identifier the evaluator binds above.
-// This is the only place we list functions by name; everything else routes
-// through KaTeX's parser.
-const OP_NAME_MAP: Record<string, string> = {
-  "\\sin": "sin", "\\cos": "cos", "\\tan": "tan",
-  "\\arcsin": "asin", "\\arccos": "acos", "\\arctan": "atan",
-  "\\sinh": "sinh", "\\cosh": "cosh", "\\tanh": "tanh",
-  "\\sec": "sec", "\\csc": "csc", "\\cot": "cot",
-  "\\ln": "log", "\\log": "log10", "\\exp": "exp",
-};
-
-// Symbols emitted by KaTeX's parser (mathord/textord.text). KaTeX keeps
-// command names like "\\pi" verbatim in .text for some symbols, and uses the
-// Unicode glyph for others — handle both. Greek letters that aren't constants
-// stay as their own JS identifier (which the evaluator will then reject as
-// an unbound name — that's fine, the user gets the "invalid expression"
-// badge).
-const SYMBOL_MAP: Record<string, string> = {
-  "π": "PI",
-  "\\pi": "PI",
-  "∞": "Infinity",
-  "\\infty": "Infinity",
-  "e": "E",
-};
-
-type KNode = { type: string; [k: string]: unknown };
-
-function katexParse(input: string): KNode[] {
-  const k = katex as unknown as {
-    __parse: (s: string, opts?: { throwOnError?: boolean }) => KNode[];
-  };
-  return k.__parse(input, { throwOnError: true });
-}
-
-function nodeToJs(n: KNode): string {
-  switch (n.type) {
-    case "ordgroup":
-      return joinBody(n.body as KNode[]);
-    case "mathord":
-    case "textord": {
-      const t = String(n.text);
-      if (SYMBOL_MAP[t] !== undefined) return SYMBOL_MAP[t];
-      if (/^[0-9.]+$/.test(t)) return t;
-      if (/^[a-zA-Z]$/.test(t)) return t;
-      throw new Error(`unsupported symbol: ${t}`);
-    }
-    case "atom": {
-      const t = String(n.text);
-      const family = String(n.family);
-      if (family === "open") return "(";
-      if (family === "close") return ")";
-      if (family === "punct") return ",";
-      if (family === "bin") {
-        if (t === "+" || t === "-" || t === "*" || t === "/") return t;
-        if (t === "−") return "-";
-        if (t === "·" || t === "⋅" || t === "×") return "*";
-        if (t === "÷") return "/";
-      }
-      throw new Error(`unsupported atom: ${family}/${t}`);
-    }
-    case "genfrac":
-      return `((${nodeToJs(n.numer as KNode)})/(${nodeToJs(n.denom as KNode)}))`;
-    case "sqrt": {
-      const body = nodeToJs(n.body as KNode);
-      const index = n.index ? nodeToJs(n.index as KNode) : null;
-      return index === null ? `sqrt(${body})` : `((${body})**(1/(${index})))`;
-    }
-    case "supsub": {
-      const base = nodeToJs(n.base as KNode);
-      const sup = n.sup ? nodeToJs(n.sup as KNode) : null;
-      return sup === null ? base : `(${base})**(${sup})`;
-    }
-    case "leftright":
-      return `(${joinBody(n.body as KNode[])})`;
-    case "spacing":
-      return "";
-    case "text":
-    case "color":
-    case "html":
-    case "styling":
-    case "font":
-      return joinBody(n.body as KNode[]);
-    case "op": {
-      const fname = OP_NAME_MAP[String(n.name)];
-      if (!fname) throw new Error(`unsupported function: ${n.name}`);
-      if (n.body) return `${fname}(${joinBody(n.body as KNode[])})`;
-      return fname;
-    }
-    case "mathchoice":
-      return nodeToJs((n.display ?? n.text) as KNode);
-    default:
-      throw new Error(`unsupported node type: ${n.type}`);
-  }
-}
-
-function isOpenParen(n: KNode | undefined): boolean {
-  return (
-    !!n && n.type === "atom" && String(n.family) === "open"
-  );
-}
-function isCloseParen(n: KNode | undefined): boolean {
-  return (
-    !!n && n.type === "atom" && String(n.family) === "close"
-  );
-}
-function isVerticalBar(n: KNode | undefined): boolean {
-  if (!n) return false;
-  const t = String(n.text);
-  return (
-    (n.type === "atom" || n.type === "textord" || n.type === "mathord") &&
-    (t === "|" || t === "∣" || t === "\\vert" || t === "\\lvert" || t === "\\rvert")
-  );
-}
-
-// Consumes the next sibling(s) of an op as its argument. When the next
-// sibling is `(`, collects the balanced group and emits `fn(<group>)`;
-// otherwise binds just the next sibling. Returns the JS string and the new
-// loop index (inclusive of the last consumed sibling).
-function consumeOpArg(
-  nodes: KNode[],
-  startIdx: number,
-  fname: string,
-): { js: string; lastIdx: number } {
-  const next = nodes[startIdx];
-  if (next === undefined) return { js: fname, lastIdx: startIdx - 1 };
-  if (isOpenParen(next)) {
-    let depth = 0;
-    let j = startIdx;
-    for (; j < nodes.length; j++) {
-      if (isOpenParen(nodes[j])) depth++;
-      else if (isCloseParen(nodes[j])) {
-        depth--;
-        if (depth === 0) break;
-      }
-    }
-    if (j >= nodes.length) {
-      // Unbalanced — fall back to single sibling.
-      return { js: `${fname}(${nodeToJs(next)})`, lastIdx: startIdx };
-    }
-    const inner = joinBody(nodes.slice(startIdx + 1, j));
-    return { js: `${fname}(${inner})`, lastIdx: j };
-  }
-  return { js: `${fname}(${nodeToJs(next)})`, lastIdx: startIdx };
-}
-
-// Joins a body of sibling nodes, peeking ahead so that `\sin(x+1)` binds the
-// whole parenthesized group, `\sin x` binds the next single sibling, and
-// `\sin^{2}(x)` becomes (sin(x))**(2). Also toggles `|...|` into `abs(...)`.
-function joinBody(nodes: KNode[]): string {
-  const parts: string[] = [];
-  let absOpen = false;
-  for (let i = 0; i < nodes.length; i++) {
-    const n = nodes[i];
-    if (isVerticalBar(n)) {
-      if (!absOpen) { parts.push("abs("); absOpen = true; }
-      else { parts.push(")"); absOpen = false; }
-      continue;
-    }
-    if (n.type === "op" && !n.body) {
-      const fname = OP_NAME_MAP[String(n.name)];
-      if (!fname) throw new Error(`unsupported function: ${n.name}`);
-      const { js, lastIdx } = consumeOpArg(nodes, i + 1, fname);
-      parts.push(js);
-      i = lastIdx;
-      continue;
-    }
-    if (
-      n.type === "supsub" &&
-      (n.base as KNode | undefined)?.type === "op" &&
-      !(n.base as KNode).body
-    ) {
-      const base = n.base as KNode;
-      const fname = OP_NAME_MAP[String(base.name)];
-      if (!fname) throw new Error(`unsupported function: ${base.name}`);
-      const sup = n.sup ? nodeToJs(n.sup as KNode) : null;
-      const { js, lastIdx } = consumeOpArg(nodes, i + 1, fname);
-      i = lastIdx;
-      parts.push(sup === null ? js : `(${js})**(${sup})`);
-      continue;
-    }
-    parts.push(nodeToJs(n));
-  }
-  if (absOpen) parts.push(")");
-  // Join with spaces so the tokenizer in insertImplicitMul sees adjacent
-  // emissions (e.g. PI + x) as separate tokens rather than the concatenation
-  // "PIx". Whitespace is skipped by the tokenizer.
-  return parts.join(" ");
-}
-
-function insertImplicitMul(s: string): string {
-  type Tok = { t: "id" | "num" | "lp" | "rp" | "op"; v: string };
-  const tokens: Tok[] = [];
-  let i = 0;
-  while (i < s.length) {
-    const c = s[i];
-    if (/\s/.test(c)) { i++; continue; }
-    if (/[a-zA-Z_]/.test(c)) {
-      let j = i;
-      while (j < s.length && /[a-zA-Z_0-9]/.test(s[j])) j++;
-      tokens.push({ t: "id", v: s.slice(i, j) });
-      i = j;
-    } else if (/[0-9.]/.test(c)) {
-      let j = i;
-      while (j < s.length && /[0-9.]/.test(s[j])) j++;
-      tokens.push({ t: "num", v: s.slice(i, j) });
-      i = j;
-    } else if (c === "(") { tokens.push({ t: "lp", v: c }); i++; }
-    else if (c === ")") { tokens.push({ t: "rp", v: c }); i++; }
-    else if (c === "*" && s[i + 1] === "*") {
-      tokens.push({ t: "op", v: "**" }); i += 2;
-    } else { tokens.push({ t: "op", v: c }); i++; }
-  }
-  let out = "";
-  for (let k = 0; k < tokens.length; k++) {
-    const tok = tokens[k];
-    const prev = tokens[k - 1];
-    let mul = false;
-    if (prev) {
-      if (prev.t === "num" && (tok.t === "id" || tok.t === "lp")) mul = true;
-      else if (prev.t === "rp" && (tok.t === "id" || tok.t === "num" || tok.t === "lp")) mul = true;
-      else if (prev.t === "id") {
-        // Functions (sin/cos/...) followed by `(` are a call site — no mul.
-        // Constants (PI/E) and bare variables still get implicit mul before
-        // a paren or another identifier.
-        const isCallable =
-          FN_MATH_SET.has(prev.v) && prev.v !== "PI" && prev.v !== "E";
-        if (tok.t === "num") mul = true;
-        else if (tok.t === "lp" && !isCallable) mul = true;
-        else if (tok.t === "id") mul = true;
-      }
-    }
-    if (mul) out += "*";
-    out += tok.v;
-  }
-  return out;
-}
-
-function latexToJs(input: string): string {
-  if (!input.trim()) return "";
-  const tree = katexParse(input);
-  return insertImplicitMul(joinBody(tree));
-}
 
 function compileExpr(raw: string): ((x: number) => number) | null {
   const cached = fnCache.get(raw);
   if (cached !== undefined) return cached;
-  if (!raw) {
+  if (!raw.trim()) {
     fnCache.set(raw, null);
     return null;
   }
-  let src: string;
+  let expr: ReturnType<typeof ce.parse>;
   try {
-    src = latexToJs(raw);
+    expr = ce.parse(raw);
   } catch {
     fnCache.set(raw, null);
     return null;
   }
-  if (!FN_ALLOWED_RE.test(src)) {
+  const json = expr.json;
+  if (Array.isArray(json) && json[0] === "Error") {
     fnCache.set(raw, null);
     return null;
   }
-  try {
-    const body = `"use strict"; return (${src});`;
-    const factory = new Function("x", ...FN_MATH_NAMES, body) as (
-      x: number,
-      ...m: unknown[]
-    ) => number;
-    const fn = (x: number) => {
-      const y = factory(x, ...FN_MATH_VALUES);
-      return typeof y === "number" ? y : NaN;
-    };
-    // Quick smoke test — reject if the expression throws at x=0.
-    fn(0);
-    fnCache.set(raw, fn);
-    return fn;
-  } catch {
+  const fn = (x: number) => {
+    try {
+      const v = expr.subs({ x }).N().valueOf();
+      return typeof v === "number" ? v : NaN;
+    } catch {
+      return NaN;
+    }
+  };
+  // Probe a few x values: if the result never resolves to a real number,
+  // the expression probably isn't a function of x (e.g. user typed
+  // `\sin(t)`) and we should mark it invalid so the canvas shows the
+  // error badge instead of an empty plot.
+  if ([0, 1, -1, 0.5].every((p) => Number.isNaN(fn(p)))) {
     fnCache.set(raw, null);
     return null;
   }
+  fnCache.set(raw, fn);
+  return fn;
 }
 
 function functionPathSegments(

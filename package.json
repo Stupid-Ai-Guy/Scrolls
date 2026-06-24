@@ -9,6 +9,7 @@
     "lint": "next lint"
   },
   "dependencies": {
+    "@cortex-js/compute-engine": "^0.62.1",
     "@libsql/client": "^0.17.4",
     "@neondatabase/serverless": "^1.1.0",
     "@types/katex": "^0.16.8",
