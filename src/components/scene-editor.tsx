@@ -38,6 +38,12 @@ function round(n: number): number {
   return Math.round(n * 10) / 10;
 }
 
+// 0.01 precision — used for dimensions (radius, width, height) so the user
+// can drag shapes below the 0.1 floor that `round` snaps positions to.
+function roundFine(n: number): number {
+  return Math.round(n * 100) / 100;
+}
+
 function escapeHtml(s: string): string {
   return s
     .replace(/&/g, "&amp;")
@@ -1272,7 +1278,7 @@ function resizePatch(
   if (s.kind === "circle") {
     if (handle !== "radius") return null;
     const r = Math.max(0.05, Math.hypot(wx - s.cx, wy - s.cy));
-    return { r: round(r) };
+    return { r: roundFine(r) };
   }
   if (s.kind === "rect" || s.kind === "button" || s.kind === "function") {
     // function uses (x,y) for the box center; rect/button use (cx,cy).
@@ -1290,8 +1296,8 @@ function resizePatch(
       const base: Record<string, number> = isFn
         ? { x: round(ncx), y: round(ncy) }
         : { cx: round(ncx), cy: round(ncy) };
-      if (nw !== undefined) base.w = round(nw);
-      if (nh !== undefined) base.h = round(nh);
+      if (nw !== undefined) base.w = roundFine(nw);
+      if (nh !== undefined) base.h = roundFine(nh);
       return base as Partial<SceneShape>;
     };
 
@@ -3060,6 +3066,28 @@ function ContextBar({
               onBeginEdit?.();
               onUpdate({ filled: !selected.filled });
             }}
+          />
+        </>
+      )}
+
+      {selected.kind === "circle" && (
+        <>
+          <Sep />
+          <span className="text-[11px] text-zinc-500">d</span>
+          <input
+            type="number"
+            value={Number((selected.r * 2).toFixed(2))}
+            onFocus={onBeginEdit}
+            onChange={(e) => {
+              const d = Number(e.target.value);
+              if (!Number.isNaN(d) && d > 0) {
+                onUpdate({ r: roundFine(d / 2) });
+              }
+            }}
+            step="0.05"
+            min="0.02"
+            suppressHydrationWarning
+            className={`${inputCls} w-20 font-mono`}
           />
         </>
       )}
