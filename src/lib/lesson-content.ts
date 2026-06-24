@@ -90,6 +90,17 @@ export type SceneShape =
       label: string;
       buttonId: string;
       color: string;
+    }
+  | {
+      id: string;
+      kind: "function";
+      x: number;
+      y: number;
+      expr: string;
+      color: string;
+      xmin?: number;
+      xmax?: number;
+      samples?: number;
     };
 
 export type Scene = {

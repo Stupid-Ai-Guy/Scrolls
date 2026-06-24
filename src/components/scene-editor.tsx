@@ -46,6 +46,366 @@ function escapeHtml(s: string): string {
     .replace(/'/g, "&#039;");
 }
 
+// ---------------- LaTeX → JS expression compiler ----------------
+// Delegates parsing to KaTeX (`katex.__parse`), which already handles every
+// LaTeX command we care about — `\frac`, `\sqrt`, `\sin`, `\sum`, Greek
+// letters, etc. — so we don't maintain a per-command regex table. The
+// resulting AST is walked once and emitted as a JS expression that
+// `new Function` evaluates. Math.* is injected as named params (no globals,
+// no `with`); after emission the only characters allowed are the safe set
+// in FN_ALLOWED_RE so anything KaTeX accepts but we can't translate gets
+// rejected at compile time.
+const FN_MATH_NAMES = [
+  "PI", "E",
+  "sin", "cos", "tan", "asin", "acos", "atan", "atan2",
+  "sinh", "cosh", "tanh", "sec", "csc", "cot",
+  "sqrt", "cbrt", "exp", "log", "log10", "log2",
+  "abs", "sign", "floor", "ceil", "round", "max", "min", "pow",
+] as const;
+const FN_MATH_VALUES: unknown[] = [
+  Math.PI, Math.E,
+  Math.sin, Math.cos, Math.tan,
+  Math.asin, Math.acos, Math.atan, Math.atan2,
+  Math.sinh, Math.cosh, Math.tanh,
+  (x: number) => 1 / Math.cos(x),
+  (x: number) => 1 / Math.sin(x),
+  (x: number) => 1 / Math.tan(x),
+  Math.sqrt, Math.cbrt, Math.exp,
+  Math.log, Math.log10, Math.log2,
+  Math.abs, Math.sign, Math.floor, Math.ceil, Math.round,
+  Math.max, Math.min, Math.pow,
+];
+const FN_MATH_SET = new Set<string>(FN_MATH_NAMES);
+const FN_ALLOWED_RE = /^[a-zA-Z0-9_+\-*/%().,\s]*$/;
+const fnCache = new Map<string, ((x: number) => number) | null>();
+
+// LaTeX op (`\sin`, `\log`, ...) → JS identifier the evaluator binds above.
+// This is the only place we list functions by name; everything else routes
+// through KaTeX's parser.
+const OP_NAME_MAP: Record<string, string> = {
+  "\\sin": "sin", "\\cos": "cos", "\\tan": "tan",
+  "\\arcsin": "asin", "\\arccos": "acos", "\\arctan": "atan",
+  "\\sinh": "sinh", "\\cosh": "cosh", "\\tanh": "tanh",
+  "\\sec": "sec", "\\csc": "csc", "\\cot": "cot",
+  "\\ln": "log", "\\log": "log10", "\\exp": "exp",
+};
+
+// Symbols emitted by KaTeX's parser (mathord/textord.text). KaTeX keeps
+// command names like "\\pi" verbatim in .text for some symbols, and uses the
+// Unicode glyph for others — handle both. Greek letters that aren't constants
+// stay as their own JS identifier (which the evaluator will then reject as
+// an unbound name — that's fine, the user gets the "invalid expression"
+// badge).
+const SYMBOL_MAP: Record<string, string> = {
+  "π": "PI",
+  "\\pi": "PI",
+  "∞": "Infinity",
+  "\\infty": "Infinity",
+  "e": "E",
+};
+
+type KNode = { type: string; [k: string]: unknown };
+
+function katexParse(input: string): KNode[] {
+  const k = katex as unknown as {
+    __parse: (s: string, opts?: { throwOnError?: boolean }) => KNode[];
+  };
+  return k.__parse(input, { throwOnError: true });
+}
+
+function nodeToJs(n: KNode): string {
+  switch (n.type) {
+    case "ordgroup":
+      return joinBody(n.body as KNode[]);
+    case "mathord":
+    case "textord": {
+      const t = String(n.text);
+      if (SYMBOL_MAP[t] !== undefined) return SYMBOL_MAP[t];
+      if (/^[0-9.]+$/.test(t)) return t;
+      if (/^[a-zA-Z]$/.test(t)) return t;
+      throw new Error(`unsupported symbol: ${t}`);
+    }
+    case "atom": {
+      const t = String(n.text);
+      const family = String(n.family);
+      if (family === "open") return "(";
+      if (family === "close") return ")";
+      if (family === "punct") return ",";
+      if (family === "bin") {
+        if (t === "+" || t === "-" || t === "*" || t === "/") return t;
+        if (t === "−") return "-";
+        if (t === "·" || t === "⋅" || t === "×") return "*";
+        if (t === "÷") return "/";
+      }
+      throw new Error(`unsupported atom: ${family}/${t}`);
+    }
+    case "genfrac":
+      return `((${nodeToJs(n.numer as KNode)})/(${nodeToJs(n.denom as KNode)}))`;
+    case "sqrt": {
+      const body = nodeToJs(n.body as KNode);
+      const index = n.index ? nodeToJs(n.index as KNode) : null;
+      return index === null ? `sqrt(${body})` : `((${body})**(1/(${index})))`;
+    }
+    case "supsub": {
+      const base = nodeToJs(n.base as KNode);
+      const sup = n.sup ? nodeToJs(n.sup as KNode) : null;
+      return sup === null ? base : `(${base})**(${sup})`;
+    }
+    case "leftright":
+      return `(${joinBody(n.body as KNode[])})`;
+    case "spacing":
+      return "";
+    case "text":
+    case "color":
+    case "html":
+    case "styling":
+    case "font":
+      return joinBody(n.body as KNode[]);
+    case "op": {
+      const fname = OP_NAME_MAP[String(n.name)];
+      if (!fname) throw new Error(`unsupported function: ${n.name}`);
+      if (n.body) return `${fname}(${joinBody(n.body as KNode[])})`;
+      return fname;
+    }
+    case "mathchoice":
+      return nodeToJs((n.display ?? n.text) as KNode);
+    default:
+      throw new Error(`unsupported node type: ${n.type}`);
+  }
+}
+
+function isOpenParen(n: KNode | undefined): boolean {
+  return (
+    !!n && n.type === "atom" && String(n.family) === "open"
+  );
+}
+function isCloseParen(n: KNode | undefined): boolean {
+  return (
+    !!n && n.type === "atom" && String(n.family) === "close"
+  );
+}
+function isVerticalBar(n: KNode | undefined): boolean {
+  if (!n) return false;
+  const t = String(n.text);
+  return (
+    (n.type === "atom" || n.type === "textord" || n.type === "mathord") &&
+    (t === "|" || t === "∣" || t === "\\vert" || t === "\\lvert" || t === "\\rvert")
+  );
+}
+
+// Consumes the next sibling(s) of an op as its argument. When the next
+// sibling is `(`, collects the balanced group and emits `fn(<group>)`;
+// otherwise binds just the next sibling. Returns the JS string and the new
+// loop index (inclusive of the last consumed sibling).
+function consumeOpArg(
+  nodes: KNode[],
+  startIdx: number,
+  fname: string,
+): { js: string; lastIdx: number } {
+  const next = nodes[startIdx];
+  if (next === undefined) return { js: fname, lastIdx: startIdx - 1 };
+  if (isOpenParen(next)) {
+    let depth = 0;
+    let j = startIdx;
+    for (; j < nodes.length; j++) {
+      if (isOpenParen(nodes[j])) depth++;
+      else if (isCloseParen(nodes[j])) {
+        depth--;
+        if (depth === 0) break;
+      }
+    }
+    if (j >= nodes.length) {
+      // Unbalanced — fall back to single sibling.
+      return { js: `${fname}(${nodeToJs(next)})`, lastIdx: startIdx };
+    }
+    const inner = joinBody(nodes.slice(startIdx + 1, j));
+    return { js: `${fname}(${inner})`, lastIdx: j };
+  }
+  return { js: `${fname}(${nodeToJs(next)})`, lastIdx: startIdx };
+}
+
+// Joins a body of sibling nodes, peeking ahead so that `\sin(x+1)` binds the
+// whole parenthesized group, `\sin x` binds the next single sibling, and
+// `\sin^{2}(x)` becomes (sin(x))**(2). Also toggles `|...|` into `abs(...)`.
+function joinBody(nodes: KNode[]): string {
+  const parts: string[] = [];
+  let absOpen = false;
+  for (let i = 0; i < nodes.length; i++) {
+    const n = nodes[i];
+    if (isVerticalBar(n)) {
+      if (!absOpen) { parts.push("abs("); absOpen = true; }
+      else { parts.push(")"); absOpen = false; }
+      continue;
+    }
+    if (n.type === "op" && !n.body) {
+      const fname = OP_NAME_MAP[String(n.name)];
+      if (!fname) throw new Error(`unsupported function: ${n.name}`);
+      const { js, lastIdx } = consumeOpArg(nodes, i + 1, fname);
+      parts.push(js);
+      i = lastIdx;
+      continue;
+    }
+    if (
+      n.type === "supsub" &&
+      (n.base as KNode | undefined)?.type === "op" &&
+      !(n.base as KNode).body
+    ) {
+      const base = n.base as KNode;
+      const fname = OP_NAME_MAP[String(base.name)];
+      if (!fname) throw new Error(`unsupported function: ${base.name}`);
+      const sup = n.sup ? nodeToJs(n.sup as KNode) : null;
+      const { js, lastIdx } = consumeOpArg(nodes, i + 1, fname);
+      i = lastIdx;
+      parts.push(sup === null ? js : `(${js})**(${sup})`);
+      continue;
+    }
+    parts.push(nodeToJs(n));
+  }
+  if (absOpen) parts.push(")");
+  // Join with spaces so the tokenizer in insertImplicitMul sees adjacent
+  // emissions (e.g. PI + x) as separate tokens rather than the concatenation
+  // "PIx". Whitespace is skipped by the tokenizer.
+  return parts.join(" ");
+}
+
+function insertImplicitMul(s: string): string {
+  type Tok = { t: "id" | "num" | "lp" | "rp" | "op"; v: string };
+  const tokens: Tok[] = [];
+  let i = 0;
+  while (i < s.length) {
+    const c = s[i];
+    if (/\s/.test(c)) { i++; continue; }
+    if (/[a-zA-Z_]/.test(c)) {
+      let j = i;
+      while (j < s.length && /[a-zA-Z_0-9]/.test(s[j])) j++;
+      tokens.push({ t: "id", v: s.slice(i, j) });
+      i = j;
+    } else if (/[0-9.]/.test(c)) {
+      let j = i;
+      while (j < s.length && /[0-9.]/.test(s[j])) j++;
+      tokens.push({ t: "num", v: s.slice(i, j) });
+      i = j;
+    } else if (c === "(") { tokens.push({ t: "lp", v: c }); i++; }
+    else if (c === ")") { tokens.push({ t: "rp", v: c }); i++; }
+    else if (c === "*" && s[i + 1] === "*") {
+      tokens.push({ t: "op", v: "**" }); i += 2;
+    } else { tokens.push({ t: "op", v: c }); i++; }
+  }
+  let out = "";
+  for (let k = 0; k < tokens.length; k++) {
+    const tok = tokens[k];
+    const prev = tokens[k - 1];
+    let mul = false;
+    if (prev) {
+      if (prev.t === "num" && (tok.t === "id" || tok.t === "lp")) mul = true;
+      else if (prev.t === "rp" && (tok.t === "id" || tok.t === "num" || tok.t === "lp")) mul = true;
+      else if (prev.t === "id") {
+        // Functions (sin/cos/...) followed by `(` are a call site — no mul.
+        // Constants (PI/E) and bare variables still get implicit mul before
+        // a paren or another identifier.
+        const isCallable =
+          FN_MATH_SET.has(prev.v) && prev.v !== "PI" && prev.v !== "E";
+        if (tok.t === "num") mul = true;
+        else if (tok.t === "lp" && !isCallable) mul = true;
+        else if (tok.t === "id") mul = true;
+      }
+    }
+    if (mul) out += "*";
+    out += tok.v;
+  }
+  return out;
+}
+
+function latexToJs(input: string): string {
+  if (!input.trim()) return "";
+  const tree = katexParse(input);
+  return insertImplicitMul(joinBody(tree));
+}
+
+function compileExpr(raw: string): ((x: number) => number) | null {
+  const cached = fnCache.get(raw);
+  if (cached !== undefined) return cached;
+  if (!raw) {
+    fnCache.set(raw, null);
+    return null;
+  }
+  let src: string;
+  try {
+    src = latexToJs(raw);
+  } catch {
+    fnCache.set(raw, null);
+    return null;
+  }
+  if (!FN_ALLOWED_RE.test(src)) {
+    fnCache.set(raw, null);
+    return null;
+  }
+  try {
+    const body = `"use strict"; return (${src});`;
+    const factory = new Function("x", ...FN_MATH_NAMES, body) as (
+      x: number,
+      ...m: unknown[]
+    ) => number;
+    const fn = (x: number) => {
+      const y = factory(x, ...FN_MATH_VALUES);
+      return typeof y === "number" ? y : NaN;
+    };
+    // Quick smoke test — reject if the expression throws at x=0.
+    fn(0);
+    fnCache.set(raw, fn);
+    return fn;
+  } catch {
+    fnCache.set(raw, null);
+    return null;
+  }
+}
+
+function functionPathSegments(
+  fn: (x: number) => number,
+  xmin: number,
+  xmax: number,
+  ymin: number,
+  ymax: number,
+  samples: number,
+  toX: (wx: number) => number,
+  toY: (wy: number) => number,
+): string[] {
+  if (samples < 2) samples = 2;
+  // Clamp y to a band slightly outside the visible window so steep curves
+  // (1/x, tan, etc.) draw cleanly to the edge instead of shooting to infinity.
+  const yPad = (ymax - ymin) * 2;
+  const yLo = ymin - yPad;
+  const yHi = ymax + yPad;
+  const segments: string[] = [];
+  let current: string[] = [];
+  const flush = () => {
+    if (current.length >= 2) segments.push("M" + current.join(" L"));
+    current = [];
+  };
+  let prevClamped: number | null = null;
+  for (let i = 0; i < samples; i++) {
+    const wx = xmin + ((xmax - xmin) * i) / (samples - 1);
+    const raw = fn(wx);
+    if (!Number.isFinite(raw)) {
+      flush();
+      prevClamped = null;
+      continue;
+    }
+    const clamped = Math.max(yLo, Math.min(yHi, raw));
+    // Big jump between adjacent samples (likely an asymptote) — break the path.
+    if (
+      prevClamped !== null &&
+      Math.abs(clamped - prevClamped) > (ymax - ymin) * 4
+    ) {
+      flush();
+    }
+    current.push(`${toX(wx).toFixed(2)},${toY(clamped).toFixed(2)}`);
+    prevClamped = clamped;
+  }
+  flush();
+  return segments;
+}
+
 function makeShape(kind: SceneShape["kind"], wx: number, wy: number): SceneShape {
   const id = uid();
   switch (kind) {
@@ -115,6 +475,15 @@ function makeShape(kind: SceneShape["kind"], wx: number, wy: number): SceneShape
         label: "Click",
         buttonId: `btn-${id}`,
         color: "amber",
+      };
+    case "function":
+      return {
+        id,
+        kind,
+        x: round(wx),
+        y: round(wy),
+        expr: "\\sin(x)",
+        color: "sky",
       };
   }
 }
@@ -239,6 +608,25 @@ function LatexIcon() {
       >
         TeX
       </text>
+    </svg>
+  );
+}
+
+function FunctionIcon() {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      className="h-5 w-5"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      {/* y = sin(x)-like curve */}
+      <path d="M3 12 Q 7 4, 12 12 T 21 12" />
+      <line x1="3" y1="20" x2="21" y2="20" opacity="0.4" />
+      <line x1="3" y1="4" x2="3" y2="20" opacity="0.4" />
     </svg>
   );
 }
@@ -377,7 +765,12 @@ type RendererProps = {
 };
 
 function shapeTopAnchor(s: SceneShape): { x: number; y: number } {
-  if (s.kind === "point" || s.kind === "text" || s.kind === "latex")
+  if (
+    s.kind === "point" ||
+    s.kind === "text" ||
+    s.kind === "latex" ||
+    s.kind === "function"
+  )
     return { x: s.x, y: s.y };
   if (s.kind === "line")
     return { x: (s.x1 + s.x2) / 2, y: Math.max(s.y1, s.y2) };
@@ -396,7 +789,12 @@ function shapeBBox(s: SceneShape): {
   maxX: number;
   maxY: number;
 } {
-  if (s.kind === "point" || s.kind === "text" || s.kind === "latex") {
+  if (
+    s.kind === "point" ||
+    s.kind === "text" ||
+    s.kind === "latex" ||
+    s.kind === "function"
+  ) {
     return { minX: s.x, minY: s.y, maxX: s.x, maxY: s.y };
   }
   if (s.kind === "line") {
@@ -1028,6 +1426,7 @@ function SceneCanvas({
             clickedButtonId,
             showConnectionPoints:
               activeTool === "line" || activeTool === "polyline",
+            view: scene.view,
             onClick: onClickButton,
             onMouseDown:
               onUpdateShape && activeTool === "select" && !spacePan
@@ -1079,7 +1478,12 @@ function SceneCanvas({
 }
 
 function movePatch(s: SceneShape, dxw: number, dyw: number): Partial<SceneShape> {
-  if (s.kind === "point" || s.kind === "text" || s.kind === "latex") {
+  if (
+    s.kind === "point" ||
+    s.kind === "text" ||
+    s.kind === "latex" ||
+    s.kind === "function"
+  ) {
     return { x: round(s.x + dxw), y: round(s.y + dyw) };
   }
   if (s.kind === "line") {
@@ -1261,6 +1665,7 @@ function renderShape(
     editingLatexId?: string;
     clickedButtonId?: string;
     showConnectionPoints?: boolean;
+    view?: { xmin: number; xmax: number; ymin: number; ymax: number };
     onClick?: (buttonId: string) => void;
     onMouseDown?: (e: React.MouseEvent<SVGGElement>) => void;
     onContextMenu?: (e: React.MouseEvent<SVGGElement>) => void;
@@ -1469,6 +1874,132 @@ function renderShape(
         >
           {s.text}
         </text>
+      </g>
+    );
+  }
+  if (s.kind === "function") {
+    const view = ctx.view;
+    const fn = compileExpr(s.expr);
+    const xLo = s.xmin ?? view?.xmin ?? -10;
+    const xHi = s.xmax ?? view?.xmax ?? 10;
+    const yLo = view?.ymin ?? -10;
+    const yHi = view?.ymax ?? 10;
+    const segments = fn
+      ? functionPathSegments(
+          fn,
+          xLo,
+          xHi,
+          yLo,
+          yHi,
+          s.samples ?? 320,
+          toX,
+          toY,
+        )
+      : [];
+    const labelX = toX(s.x);
+    const labelY = toY(s.y);
+    const isEditing = ctx.editingLatexId === s.id;
+    const fW = 240;
+    const fH = 40;
+    let labelHtml = "";
+    if (fn && !isEditing) {
+      try {
+        labelHtml = katex.renderToString(`y = ${s.expr || ""}`, {
+          throwOnError: false,
+          displayMode: false,
+          output: "html",
+        });
+      } catch {
+        labelHtml = `<span style="color:${color}">${escapeHtml(
+          `y = ${s.expr}`,
+        )}</span>`;
+      }
+    }
+    return (
+      <g key={s.id} {...interact}>
+        {/* Invisible widened hit-area along the label so the shape is easy
+            to click; the curve itself is decorative and pointer-events=none. */}
+        <rect
+          x={labelX - fW / 2}
+          y={labelY - fH / 2}
+          width={fW}
+          height={fH}
+          fill="transparent"
+        />
+        {segments.map((d, i) => (
+          <path
+            key={i}
+            d={d}
+            fill="none"
+            stroke={color}
+            strokeWidth={isSelected ? 3 : 2}
+            strokeLinejoin="round"
+            strokeLinecap="round"
+            pointerEvents="none"
+          />
+        ))}
+        {!fn && (
+          <text
+            x={labelX}
+            y={labelY + 5}
+            fill="#fb7185"
+            fontSize="12"
+            fontFamily="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace"
+            textAnchor="middle"
+            pointerEvents="none"
+          >
+            ⚠ invalid expression
+          </text>
+        )}
+        {fn && isEditing && (
+          <text
+            x={labelX}
+            y={labelY + 5}
+            fill={color}
+            fontSize="13"
+            fontFamily="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace"
+            textAnchor="middle"
+            pointerEvents="none"
+          >
+            {`y = ${s.expr}`}
+          </text>
+        )}
+        {fn && !isEditing && (
+          <foreignObject
+            x={labelX - fW / 2}
+            y={labelY - fH / 2}
+            width={fW}
+            height={fH}
+            pointerEvents="none"
+          >
+            <div
+              style={{
+                width: "100%",
+                height: "100%",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                color,
+                fontSize: 16,
+                lineHeight: 1.2,
+              }}
+              dangerouslySetInnerHTML={{ __html: labelHtml }}
+            />
+          </foreignObject>
+        )}
+        {isSelected && (
+          <rect
+            x={labelX - fW / 2}
+            y={labelY - fH / 2}
+            width={fW}
+            height={fH}
+            fill="none"
+            stroke="#22d3ee"
+            strokeWidth="2"
+            strokeDasharray="4 2"
+            pointerEvents="none"
+          />
+        )}
       </g>
     );
   }
@@ -1832,7 +2363,8 @@ export function SceneEditor({
     if (
       shape.kind === "point" ||
       shape.kind === "text" ||
-      shape.kind === "latex"
+      shape.kind === "latex" ||
+      shape.kind === "function"
     ) {
       return {
         ...shape,
@@ -2237,6 +2769,7 @@ const TOOL_COLORS = {
   texts: { idle: "text-violet-300", active: "bg-violet-500/15 text-violet-200" },
   text: { idle: "text-violet-300", active: "bg-violet-500/15 text-violet-200" },
   latex: { idle: "text-violet-300", active: "bg-violet-500/15 text-violet-200" },
+  function: { idle: "text-cyan-300", active: "bg-cyan-500/15 text-cyan-200" },
   button: { idle: "text-amber-300", active: "bg-amber-500/15 text-amber-200" },
   viewport: { idle: "text-amber-300", active: "bg-amber-500/15 text-amber-200" },
   canvas: { idle: "text-zinc-400", active: "bg-zinc-700/40 text-zinc-100" },
@@ -2296,7 +2829,8 @@ function Sidebar({
   const shapeActive =
     activeTool === "point" || activeTool === "circle" || activeTool === "rect";
   const lineActive = activeTool === "line" || activeTool === "polyline";
-  const textActive = activeTool === "text" || activeTool === "latex";
+  const textActive =
+    activeTool === "text" || activeTool === "latex" || activeTool === "function";
 
   return (
     <div className="relative flex flex-col gap-1 rounded-2xl bg-zinc-900/95 p-1.5 shadow-2xl shadow-black/60 ring-1 ring-white/5 backdrop-blur">
@@ -2438,6 +2972,17 @@ function Sidebar({
               active={activeTool === "latex"}
             >
               <LatexIcon />
+            </FlyoutItem>
+            <FlyoutItem
+              label="Function (y = f(x))"
+              onClick={() => {
+                onSelectTool("function");
+                setTextsOpen(false);
+              }}
+              tone={TOOL_COLORS.function}
+              active={activeTool === "function"}
+            >
+              <FunctionIcon />
             </FlyoutItem>
           </div>
         )}
@@ -2708,6 +3253,45 @@ function ContextBar({
             spellCheck={false}
             suppressHydrationWarning
             className={`${inputCls} w-56 font-mono`}
+          />
+        </>
+      )}
+      {selected.kind === "function" && (
+        <>
+          <Sep />
+          <span className="text-[11px] text-zinc-500">y =</span>
+          <input
+            value={selected.expr}
+            onFocus={onBeginEdit}
+            onChange={(e) => onUpdate({ expr: e.target.value })}
+            placeholder="\sin(x)"
+            spellCheck={false}
+            suppressHydrationWarning
+            className={`${inputCls} w-56 font-mono`}
+          />
+          <input
+            type="number"
+            value={selected.xmin ?? ""}
+            onFocus={onBeginEdit}
+            onChange={(e) => {
+              const v = e.target.value;
+              onUpdate({ xmin: v === "" ? undefined : Number(v) });
+            }}
+            placeholder="xmin"
+            suppressHydrationWarning
+            className={`${inputCls} w-16 font-mono`}
+          />
+          <input
+            type="number"
+            value={selected.xmax ?? ""}
+            onFocus={onBeginEdit}
+            onChange={(e) => {
+              const v = e.target.value;
+              onUpdate({ xmax: v === "" ? undefined : Number(v) });
+            }}
+            placeholder="xmax"
+            suppressHydrationWarning
+            className={`${inputCls} w-16 font-mono`}
           />
         </>
       )}
