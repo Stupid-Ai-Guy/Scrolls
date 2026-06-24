@@ -71,6 +71,7 @@ export type SceneShape =
       y: number;
       text: string;
       color: string;
+      size?: number;
     }
   | {
       id: string;

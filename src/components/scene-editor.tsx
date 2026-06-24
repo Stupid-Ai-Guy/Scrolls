@@ -1271,7 +1271,7 @@ function resizePatch(
   }
   if (s.kind === "circle") {
     if (handle !== "radius") return null;
-    const r = Math.max(0.2, Math.hypot(wx - s.cx, wy - s.cy));
+    const r = Math.max(0.05, Math.hypot(wx - s.cx, wy - s.cy));
     return { r: round(r) };
   }
   if (s.kind === "rect" || s.kind === "button" || s.kind === "function") {
@@ -1297,22 +1297,22 @@ function resizePatch(
 
     // Edge handles: resize one dimension, opposite edge stays fixed.
     if (handle === "t") {
-      const nh = Math.max(0.4, Math.abs(wy - bottom));
+      const nh = Math.max(0.1, Math.abs(wy - bottom));
       const ncy = (wy + bottom) / 2;
       return patch(cx, ncy, undefined, nh);
     }
     if (handle === "b") {
-      const nh = Math.max(0.4, Math.abs(top - wy));
+      const nh = Math.max(0.1, Math.abs(top - wy));
       const ncy = (top + wy) / 2;
       return patch(cx, ncy, undefined, nh);
     }
     if (handle === "l") {
-      const nw = Math.max(0.4, Math.abs(right - wx));
+      const nw = Math.max(0.1, Math.abs(right - wx));
       const ncx = (right + wx) / 2;
       return patch(ncx, cy, nw, undefined);
     }
     if (handle === "r") {
-      const nw = Math.max(0.4, Math.abs(wx - left));
+      const nw = Math.max(0.1, Math.abs(wx - left));
       const ncx = (wx + left) / 2;
       return patch(ncx, cy, nw, undefined);
     }
@@ -1333,8 +1333,8 @@ function resizePatch(
       fixedX = left;
       fixedY = top;
     } else return null;
-    const nw = Math.max(0.4, Math.abs(wx - fixedX));
-    const nh = Math.max(0.4, Math.abs(wy - fixedY));
+    const nw = Math.max(0.1, Math.abs(wx - fixedX));
+    const nh = Math.max(0.1, Math.abs(wy - fixedY));
     const ncx = (wx + fixedX) / 2;
     const ncy = (wy + fixedY) / 2;
     return patch(ncx, ncy, nw, nh);
@@ -1614,14 +1614,19 @@ function renderShape(
     );
   }
   if (s.kind === "text") {
+    const fontSize = s.size ?? 15;
+    // Selection rect scales with the font so tiny text doesn't get a huge
+    // outline and large text still fits inside its dashed box.
+    const selH = Math.max(14, fontSize * 1.5);
+    const selW = Math.max(40, fontSize * 4);
     return (
       <g key={s.id} {...interact}>
         {isSelected && (
           <rect
-            x={toX(s.x) - 30}
-            y={toY(s.y) - 11}
-            width="60"
-            height="22"
+            x={toX(s.x) - selW / 2}
+            y={toY(s.y) - selH / 2}
+            width={selW}
+            height={selH}
             fill="none"
             stroke="#22d3ee"
             strokeWidth="2"
@@ -1630,9 +1635,9 @@ function renderShape(
         )}
         <text
           x={toX(s.x)}
-          y={toY(s.y) + 5}
+          y={toY(s.y) + fontSize / 3}
           fill={color}
-          fontSize="15"
+          fontSize={fontSize}
           fontWeight="500"
           textAnchor="middle"
         >
@@ -3084,6 +3089,20 @@ function ContextBar({
             placeholder="Text"
             suppressHydrationWarning
             className={`${inputCls} w-40`}
+          />
+          <span className="text-[11px] text-zinc-500">size</span>
+          <input
+            type="number"
+            value={selected.size ?? ""}
+            onFocus={onBeginEdit}
+            onChange={(e) => {
+              const v = e.target.value;
+              onUpdate({ size: v === "" ? undefined : Number(v) });
+            }}
+            placeholder="15"
+            min="4"
+            suppressHydrationWarning
+            className={`${inputCls} w-16 font-mono`}
           />
         </>
       )}
