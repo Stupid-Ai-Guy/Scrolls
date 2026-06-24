@@ -217,8 +217,14 @@ function makeShape(kind: SceneShape["kind"], wx: number, wy: number): SceneShape
         kind,
         x: round(wx),
         y: round(wy),
+        w: 8,
+        h: 6,
         expr: "\\sin(x)",
         color: "sky",
+        xmin: -4,
+        xmax: 4,
+        ymin: -3,
+        ymax: 3,
       };
   }
 }
@@ -500,13 +506,12 @@ type RendererProps = {
 };
 
 function shapeTopAnchor(s: SceneShape): { x: number; y: number } {
-  if (
-    s.kind === "point" ||
-    s.kind === "text" ||
-    s.kind === "latex" ||
-    s.kind === "function"
-  )
+  if (s.kind === "point" || s.kind === "text" || s.kind === "latex")
     return { x: s.x, y: s.y };
+  if (s.kind === "function") {
+    const h = s.h ?? 6;
+    return { x: s.x, y: s.y + h / 2 };
+  }
   if (s.kind === "line")
     return { x: (s.x1 + s.x2) / 2, y: Math.max(s.y1, s.y2) };
   if (s.kind === "polyline") {
@@ -524,13 +529,18 @@ function shapeBBox(s: SceneShape): {
   maxX: number;
   maxY: number;
 } {
-  if (
-    s.kind === "point" ||
-    s.kind === "text" ||
-    s.kind === "latex" ||
-    s.kind === "function"
-  ) {
+  if (s.kind === "point" || s.kind === "text" || s.kind === "latex") {
     return { minX: s.x, minY: s.y, maxX: s.x, maxY: s.y };
+  }
+  if (s.kind === "function") {
+    const w = s.w ?? 8;
+    const h = s.h ?? 6;
+    return {
+      minX: s.x - w / 2,
+      minY: s.y - h / 2,
+      maxX: s.x + w / 2,
+      maxY: s.y + h / 2,
+    };
   }
   if (s.kind === "line") {
     return {
@@ -1264,32 +1274,47 @@ function resizePatch(
     const r = Math.max(0.2, Math.hypot(wx - s.cx, wy - s.cy));
     return { r: round(r) };
   }
-  if (s.kind === "rect" || s.kind === "button") {
-    const left = s.cx - s.w / 2;
-    const right = s.cx + s.w / 2;
-    const top = s.cy + s.h / 2;
-    const bottom = s.cy - s.h / 2;
+  if (s.kind === "rect" || s.kind === "button" || s.kind === "function") {
+    // function uses (x,y) for the box center; rect/button use (cx,cy).
+    // Normalize while computing, then write back to the correct field names.
+    const isFn = s.kind === "function";
+    const cx = isFn ? s.x : s.cx;
+    const cy = isFn ? s.y : s.cy;
+    const w0 = isFn ? s.w ?? 8 : s.w;
+    const h0 = isFn ? s.h ?? 6 : s.h;
+    const left = cx - w0 / 2;
+    const right = cx + w0 / 2;
+    const top = cy + h0 / 2;
+    const bottom = cy - h0 / 2;
+    const patch = (ncx: number, ncy: number, nw?: number, nh?: number) => {
+      const base: Record<string, number> = isFn
+        ? { x: round(ncx), y: round(ncy) }
+        : { cx: round(ncx), cy: round(ncy) };
+      if (nw !== undefined) base.w = round(nw);
+      if (nh !== undefined) base.h = round(nh);
+      return base as Partial<SceneShape>;
+    };
 
     // Edge handles: resize one dimension, opposite edge stays fixed.
     if (handle === "t") {
       const nh = Math.max(0.4, Math.abs(wy - bottom));
       const ncy = (wy + bottom) / 2;
-      return { cy: round(ncy), h: round(nh) };
+      return patch(cx, ncy, undefined, nh);
     }
     if (handle === "b") {
       const nh = Math.max(0.4, Math.abs(top - wy));
       const ncy = (top + wy) / 2;
-      return { cy: round(ncy), h: round(nh) };
+      return patch(cx, ncy, undefined, nh);
     }
     if (handle === "l") {
       const nw = Math.max(0.4, Math.abs(right - wx));
       const ncx = (right + wx) / 2;
-      return { cx: round(ncx), w: round(nw) };
+      return patch(ncx, cy, nw, undefined);
     }
     if (handle === "r") {
       const nw = Math.max(0.4, Math.abs(wx - left));
       const ncx = (wx + left) / 2;
-      return { cx: round(ncx), w: round(nw) };
+      return patch(ncx, cy, nw, undefined);
     }
 
     // Corner handles: resize both dimensions, opposite corner fixed.
@@ -1312,7 +1337,7 @@ function resizePatch(
     const nh = Math.max(0.4, Math.abs(wy - fixedY));
     const ncx = (wx + fixedX) / 2;
     const ncy = (wy + fixedY) / 2;
-    return { cx: round(ncx), cy: round(ncy), w: round(nw), h: round(nh) };
+    return patch(ncx, ncy, nw, nh);
   }
   return null;
 }
@@ -1366,18 +1391,22 @@ function renderHandles(
       </g>
     );
   }
-  if (s.kind === "rect" || s.kind === "button") {
-    const left = s.cx - s.w / 2;
-    const right = s.cx + s.w / 2;
-    const top = s.cy + s.h / 2;
-    const bottom = s.cy - s.h / 2;
+  if (s.kind === "rect" || s.kind === "button" || s.kind === "function") {
+    const cx = s.kind === "function" ? s.x : s.cx;
+    const cy = s.kind === "function" ? s.y : s.cy;
+    const w = s.kind === "function" ? s.w ?? 8 : s.w;
+    const h = s.kind === "function" ? s.h ?? 6 : s.h;
+    const left = cx - w / 2;
+    const right = cx + w / 2;
+    const top = cy + h / 2;
+    const bottom = cy - h / 2;
     return (
       <g key={`${s.id}-handles`}>
         {/* edge handles: resize one dimension */}
-        {dot(toX(s.cx), toY(top), "t", "ns-resize")}
-        {dot(toX(s.cx), toY(bottom), "b", "ns-resize")}
-        {dot(toX(left), toY(s.cy), "l", "ew-resize")}
-        {dot(toX(right), toY(s.cy), "r", "ew-resize")}
+        {dot(toX(cx), toY(top), "t", "ns-resize")}
+        {dot(toX(cx), toY(bottom), "b", "ns-resize")}
+        {dot(toX(left), toY(cy), "l", "ew-resize")}
+        {dot(toX(right), toY(cy), "r", "ew-resize")}
         {/* corner handles: resize both */}
         {dot(toX(left), toY(top), "tl", "nwse-resize")}
         {dot(toX(right), toY(top), "tr", "nesw-resize")}
@@ -1613,29 +1642,44 @@ function renderShape(
     );
   }
   if (s.kind === "function") {
-    const view = ctx.view;
+    // Box geometry in world coords (center s.x, s.y; size s.w × s.h).
+    const w = s.w ?? 8;
+    const h = s.h ?? 6;
+    const xmin = s.xmin ?? -4;
+    const xmax = s.xmax ?? 4;
+    const ymin = s.ymin ?? -3;
+    const ymax = s.ymax ?? 3;
+
+    // Box pixel rect.
+    const boxLeftPx = toX(s.x - w / 2);
+    const boxRightPx = toX(s.x + w / 2);
+    const boxTopPx = toY(s.y + h / 2);
+    const boxBottomPx = toY(s.y - h / 2);
+    const boxWPx = boxRightPx - boxLeftPx;
+    const boxHPx = boxBottomPx - boxTopPx;
+
+    // Function-space → box-pixel mappers (substituted for toX/toY so the
+    // existing path sampler doesn't care that the plot is bounded).
+    const fnX = (xs: number) =>
+      boxLeftPx + ((xs - xmin) / (xmax - xmin)) * boxWPx;
+    const fnY = (ys: number) =>
+      boxTopPx + (1 - (ys - ymin) / (ymax - ymin)) * boxHPx;
+
     const fn = compileExpr(s.expr);
-    const xLo = s.xmin ?? view?.xmin ?? -10;
-    const xHi = s.xmax ?? view?.xmax ?? 10;
-    const yLo = view?.ymin ?? -10;
-    const yHi = view?.ymax ?? 10;
     const segments = fn
       ? functionPathSegments(
           fn,
-          xLo,
-          xHi,
-          yLo,
-          yHi,
+          xmin,
+          xmax,
+          ymin,
+          ymax,
           s.samples ?? 320,
-          toX,
-          toY,
+          fnX,
+          fnY,
         )
       : [];
-    const labelX = toX(s.x);
-    const labelY = toY(s.y);
+
     const isEditing = ctx.editingLatexId === s.id;
-    const fW = 240;
-    const fH = 40;
     let labelHtml = "";
     if (fn && !isEditing) {
       try {
@@ -1650,33 +1694,85 @@ function renderShape(
         )}</span>`;
       }
     }
+
+    // Axes: only draw the ones that pass through the visible range.
+    const zeroXPx = ymin <= 0 && 0 <= ymax ? fnY(0) : null;
+    const zeroYPx = xmin <= 0 && 0 <= xmax ? fnX(0) : null;
+
+    const clipId = `fnclip-${s.id}`;
+    const labelW = boxWPx;
+    const labelH = 28;
+    const labelXPx = boxLeftPx;
+    const labelYPx = boxTopPx - labelH - 4;
+
     return (
       <g key={s.id} {...interact}>
-        {/* Invisible widened hit-area along the label so the shape is easy
-            to click; the curve itself is decorative and pointer-events=none. */}
+        <defs>
+          <clipPath id={clipId}>
+            <rect
+              x={boxLeftPx}
+              y={boxTopPx}
+              width={boxWPx}
+              height={boxHPx}
+            />
+          </clipPath>
+        </defs>
+        {/* Box background + outline (the box itself is the hit area). */}
         <rect
-          x={labelX - fW / 2}
-          y={labelY - fH / 2}
-          width={fW}
-          height={fH}
-          fill="transparent"
+          x={boxLeftPx}
+          y={boxTopPx}
+          width={boxWPx}
+          height={boxHPx}
+          fill="#0a0a0c"
+          fillOpacity="0.35"
+          stroke={color}
+          strokeOpacity="0.5"
+          strokeWidth="1"
+          rx="4"
+          ry="4"
         />
-        {segments.map((d, i) => (
-          <path
-            key={i}
-            d={d}
-            fill="none"
-            stroke={color}
-            strokeWidth={isSelected ? 3 : 2}
-            strokeLinejoin="round"
-            strokeLinecap="round"
+        {/* Internal axes. */}
+        {zeroXPx !== null && (
+          <line
+            x1={boxLeftPx}
+            x2={boxRightPx}
+            y1={zeroXPx}
+            y2={zeroXPx}
+            stroke="#52525b"
+            strokeWidth="1"
             pointerEvents="none"
           />
-        ))}
+        )}
+        {zeroYPx !== null && (
+          <line
+            x1={zeroYPx}
+            x2={zeroYPx}
+            y1={boxTopPx}
+            y2={boxBottomPx}
+            stroke="#52525b"
+            strokeWidth="1"
+            pointerEvents="none"
+          />
+        )}
+        {/* Curve, clipped to the box. */}
+        <g clipPath={`url(#${clipId})`} pointerEvents="none">
+          {segments.map((d, i) => (
+            <path
+              key={i}
+              d={d}
+              fill="none"
+              stroke={color}
+              strokeWidth={isSelected ? 2.5 : 2}
+              strokeLinejoin="round"
+              strokeLinecap="round"
+            />
+          ))}
+        </g>
+        {/* Error badge centered in the box when compile failed. */}
         {!fn && (
           <text
-            x={labelX}
-            y={labelY + 5}
+            x={(boxLeftPx + boxRightPx) / 2}
+            y={(boxTopPx + boxBottomPx) / 2 + 5}
             fill="#fb7185"
             fontSize="12"
             fontFamily="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace"
@@ -1686,10 +1782,12 @@ function renderShape(
             ⚠ invalid expression
           </text>
         )}
-        {fn && isEditing && (
+        {/* Label above the box: monospace LaTeX source while editing, else
+            KaTeX-rendered y = <expr>. */}
+        {isEditing && (
           <text
-            x={labelX}
-            y={labelY + 5}
+            x={labelXPx + labelW / 2}
+            y={labelYPx + labelH / 2 + 4}
             fill={color}
             fontSize="13"
             fontFamily="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace"
@@ -1699,12 +1797,12 @@ function renderShape(
             {`y = ${s.expr}`}
           </text>
         )}
-        {fn && !isEditing && (
+        {!isEditing && fn && (
           <foreignObject
-            x={labelX - fW / 2}
-            y={labelY - fH / 2}
-            width={fW}
-            height={fH}
+            x={labelXPx}
+            y={labelYPx}
+            width={labelW}
+            height={labelH}
             pointerEvents="none"
           >
             <div
@@ -1715,7 +1813,7 @@ function renderShape(
                 alignItems: "center",
                 justifyContent: "center",
                 color,
-                fontSize: 16,
+                fontSize: 14,
                 lineHeight: 1.2,
               }}
               dangerouslySetInnerHTML={{ __html: labelHtml }}
@@ -1724,14 +1822,16 @@ function renderShape(
         )}
         {isSelected && (
           <rect
-            x={labelX - fW / 2}
-            y={labelY - fH / 2}
-            width={fW}
-            height={fH}
+            x={boxLeftPx}
+            y={boxTopPx}
+            width={boxWPx}
+            height={boxHPx}
             fill="none"
             stroke="#22d3ee"
             strokeWidth="2"
             strokeDasharray="4 2"
+            rx="4"
+            ry="4"
             pointerEvents="none"
           />
         )}
@@ -3004,6 +3104,7 @@ function ContextBar({
             suppressHydrationWarning
             className={`${inputCls} w-56 font-mono`}
           />
+          <span className="text-[11px] text-zinc-500">x</span>
           <input
             type="number"
             value={selected.xmin ?? ""}
@@ -3014,7 +3115,7 @@ function ContextBar({
             }}
             placeholder="xmin"
             suppressHydrationWarning
-            className={`${inputCls} w-16 font-mono`}
+            className={`${inputCls} w-14 font-mono`}
           />
           <input
             type="number"
@@ -3026,7 +3127,32 @@ function ContextBar({
             }}
             placeholder="xmax"
             suppressHydrationWarning
-            className={`${inputCls} w-16 font-mono`}
+            className={`${inputCls} w-14 font-mono`}
+          />
+          <span className="text-[11px] text-zinc-500">y</span>
+          <input
+            type="number"
+            value={selected.ymin ?? ""}
+            onFocus={onBeginEdit}
+            onChange={(e) => {
+              const v = e.target.value;
+              onUpdate({ ymin: v === "" ? undefined : Number(v) });
+            }}
+            placeholder="ymin"
+            suppressHydrationWarning
+            className={`${inputCls} w-14 font-mono`}
+          />
+          <input
+            type="number"
+            value={selected.ymax ?? ""}
+            onFocus={onBeginEdit}
+            onChange={(e) => {
+              const v = e.target.value;
+              onUpdate({ ymax: v === "" ? undefined : Number(v) });
+            }}
+            placeholder="ymax"
+            suppressHydrationWarning
+            className={`${inputCls} w-14 font-mono`}
           />
         </>
       )}

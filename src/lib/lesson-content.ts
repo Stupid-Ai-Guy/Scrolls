@@ -96,10 +96,14 @@ export type SceneShape =
       kind: "function";
       x: number;
       y: number;
+      w?: number;
+      h?: number;
       expr: string;
       color: string;
       xmin?: number;
       xmax?: number;
+      ymin?: number;
+      ymax?: number;
       samples?: number;
     };
 
