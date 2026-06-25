@@ -62,6 +62,64 @@ function escapeHtml(s: string): string {
 const ce = new ComputeEngine();
 const fnCache = new Map<string, ((x: number) => number) | null>();
 
+// Function-space sample cache. Each entry holds the pre-computed y values
+// for one (expr, xmin, xmax, samples) tuple — independent of box position
+// or pixel coords, so moving / resizing the box hits this cache and only
+// the (cheap) pixel mapping reruns.
+const SAMPLE_CACHE_LIMIT = 32;
+const sampleCache = new Map<string, Float64Array>();
+
+function getFunctionSamples(
+  expr: string,
+  xmin: number,
+  xmax: number,
+  samples: number,
+): Float64Array | null {
+  const key = `${expr}|${xmin}|${xmax}|${samples}`;
+  const cached = sampleCache.get(key);
+  if (cached) return cached;
+  const fn = compileExpr(expr);
+  if (!fn) return null;
+  const ys = new Float64Array(samples);
+  const span = xmax - xmin;
+  const denom = Math.max(1, samples - 1);
+  for (let i = 0; i < samples; i++) {
+    ys[i] = fn(xmin + (span * i) / denom);
+  }
+  if (sampleCache.size >= SAMPLE_CACHE_LIMIT) {
+    const oldest = sampleCache.keys().next().value;
+    if (oldest !== undefined) sampleCache.delete(oldest);
+  }
+  sampleCache.set(key, ys);
+  return ys;
+}
+
+// KaTeX renderToString is fast individually but adds up across all latex /
+// function shapes on every parent re-render. Memoize by source string.
+const KATEX_CACHE_LIMIT = 128;
+const katexCache = new Map<string, string>();
+
+function renderKatexCached(src: string): string {
+  const cached = katexCache.get(src);
+  if (cached !== undefined) return cached;
+  let html: string;
+  try {
+    html = katex.renderToString(src, {
+      throwOnError: false,
+      displayMode: false,
+      output: "html",
+    });
+  } catch {
+    html = `<span>${escapeHtml(src)}</span>`;
+  }
+  if (katexCache.size >= KATEX_CACHE_LIMIT) {
+    const oldest = katexCache.keys().next().value;
+    if (oldest !== undefined) katexCache.delete(oldest);
+  }
+  katexCache.set(src, html);
+  return html;
+}
+
 function compileExpr(raw: string): ((x: number) => number) | null {
   const cached = fnCache.get(raw);
   if (cached !== undefined) return cached;
@@ -99,52 +157,6 @@ function compileExpr(raw: string): ((x: number) => number) | null {
   }
   fnCache.set(raw, fn);
   return fn;
-}
-
-function functionPathSegments(
-  fn: (x: number) => number,
-  xmin: number,
-  xmax: number,
-  ymin: number,
-  ymax: number,
-  samples: number,
-  toX: (wx: number) => number,
-  toY: (wy: number) => number,
-): string[] {
-  if (samples < 2) samples = 2;
-  // Clamp y to a band slightly outside the visible window so steep curves
-  // (1/x, tan, etc.) draw cleanly to the edge instead of shooting to infinity.
-  const yPad = (ymax - ymin) * 2;
-  const yLo = ymin - yPad;
-  const yHi = ymax + yPad;
-  const segments: string[] = [];
-  let current: string[] = [];
-  const flush = () => {
-    if (current.length >= 2) segments.push("M" + current.join(" L"));
-    current = [];
-  };
-  let prevClamped: number | null = null;
-  for (let i = 0; i < samples; i++) {
-    const wx = xmin + ((xmax - xmin) * i) / (samples - 1);
-    const raw = fn(wx);
-    if (!Number.isFinite(raw)) {
-      flush();
-      prevClamped = null;
-      continue;
-    }
-    const clamped = Math.max(yLo, Math.min(yHi, raw));
-    // Big jump between adjacent samples (likely an asymptote) — break the path.
-    if (
-      prevClamped !== null &&
-      Math.abs(clamped - prevClamped) > (ymax - ymin) * 4
-    ) {
-      flush();
-    }
-    current.push(`${toX(wx).toFixed(2)},${toY(clamped).toFixed(2)}`);
-    prevClamped = clamped;
-  }
-  flush();
-  return segments;
 }
 
 function makeShape(kind: SceneShape["kind"], wx: number, wy: number): SceneShape {
@@ -1669,42 +1681,55 @@ function renderShape(
     const boxWPx = boxRightPx - boxLeftPx;
     const boxHPx = boxBottomPx - boxTopPx;
 
-    // Function-space → box-pixel mappers (substituted for toX/toY so the
-    // existing path sampler doesn't care that the plot is bounded).
+    // Function-space → box-pixel mappers.
     const fnX = (xs: number) =>
       boxLeftPx + ((xs - xmin) / (xmax - xmin)) * boxWPx;
     const fnY = (ys: number) =>
       boxTopPx + (1 - (ys - ymin) / (ymax - ymin)) * boxHPx;
 
+    // Samples are cached by (expr, xmin, xmax, samples) so moving / resizing
+    // the box just re-maps to pixels rather than re-evaluating Cortex 200×.
+    const samples = s.samples ?? 200;
     const fn = compileExpr(s.expr);
-    const segments = fn
-      ? functionPathSegments(
-          fn,
-          xmin,
-          xmax,
-          ymin,
-          ymax,
-          s.samples ?? 320,
-          fnX,
-          fnY,
-        )
-      : [];
+    const ys = fn ? getFunctionSamples(s.expr, xmin, xmax, samples) : null;
+
+    // Inline path builder — clamps y to a padded band so steep curves draw
+    // to the edge, breaks the path on non-finite or asymptote jumps.
+    const segments: string[] = [];
+    if (ys) {
+      const yPad = (ymax - ymin) * 2;
+      const yLo = ymin - yPad;
+      const yHi = ymax + yPad;
+      const yJump = (ymax - ymin) * 4;
+      const span = xmax - xmin;
+      const denom = Math.max(1, samples - 1);
+      let current: string[] = [];
+      const flush = () => {
+        if (current.length >= 2) segments.push("M" + current.join(" L"));
+        current = [];
+      };
+      let prevClamped: number | null = null;
+      for (let i = 0; i < samples; i++) {
+        const raw = ys[i];
+        if (!Number.isFinite(raw)) {
+          flush();
+          prevClamped = null;
+          continue;
+        }
+        const clamped = raw < yLo ? yLo : raw > yHi ? yHi : raw;
+        if (prevClamped !== null && Math.abs(clamped - prevClamped) > yJump) {
+          flush();
+        }
+        const wx = xmin + (span * i) / denom;
+        current.push(`${fnX(wx).toFixed(2)},${fnY(clamped).toFixed(2)}`);
+        prevClamped = clamped;
+      }
+      flush();
+    }
 
     const isEditing = ctx.editingLatexId === s.id;
-    let labelHtml = "";
-    if (fn && !isEditing) {
-      try {
-        labelHtml = katex.renderToString(`y = ${s.expr || ""}`, {
-          throwOnError: false,
-          displayMode: false,
-          output: "html",
-        });
-      } catch {
-        labelHtml = `<span style="color:${color}">${escapeHtml(
-          `y = ${s.expr}`,
-        )}</span>`;
-      }
-    }
+    const labelHtml =
+      fn && !isEditing ? renderKatexCached(`y = ${s.expr || ""}`) : "";
 
     // Axes: only draw the ones that pass through the visible range.
     const zeroXPx = ymin <= 0 && 0 <= ymax ? fnY(0) : null;
@@ -1907,16 +1932,7 @@ function renderShape(
         </g>
       );
     }
-    let html = "";
-    try {
-      html = katex.renderToString(s.code || " ", {
-        throwOnError: false,
-        displayMode: false,
-        output: "html",
-      });
-    } catch {
-      html = `<span style="color:#fb7185">${escapeHtml(s.code)}</span>`;
-    }
+    const html = renderKatexCached(s.code || " ");
     return (
       <g key={s.id} {...interact}>
         <rect
@@ -2955,6 +2971,80 @@ function FlyoutItem({
 
 // ---------------- Context bar ----------------
 
+// Debounced text input — used for the function shape's `expr` field where
+// the downstream work (Cortex parse + 200 evals + KaTeX render) is heavy
+// enough to make uncontrolled per-keystroke updates feel laggy. The input
+// itself reflects what the user typed immediately; onCommit fires 150 ms
+// after they pause, or on blur. Local state syncs from `value` so external
+// updates (selection change, undo) still flow through.
+function DebouncedInput({
+  value,
+  onCommit,
+  onFocus,
+  onBlur,
+  delay = 150,
+  className,
+  placeholder,
+  spellCheck,
+}: {
+  value: string;
+  onCommit: (v: string) => void;
+  onFocus?: () => void;
+  onBlur?: () => void;
+  delay?: number;
+  className?: string;
+  placeholder?: string;
+  spellCheck?: boolean;
+}) {
+  const [local, setLocal] = useState(value);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pendingRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    setLocal(value);
+  }, [value]);
+
+  useEffect(
+    () => () => {
+      if (timerRef.current) clearTimeout(timerRef.current);
+    },
+    [],
+  );
+
+  return (
+    <input
+      value={local}
+      onFocus={onFocus}
+      onChange={(e) => {
+        const v = e.target.value;
+        setLocal(v);
+        pendingRef.current = v;
+        if (timerRef.current) clearTimeout(timerRef.current);
+        timerRef.current = setTimeout(() => {
+          timerRef.current = null;
+          pendingRef.current = null;
+          onCommit(v);
+        }, delay);
+      }}
+      onBlur={() => {
+        if (timerRef.current) {
+          clearTimeout(timerRef.current);
+          timerRef.current = null;
+          if (pendingRef.current !== null) {
+            onCommit(pendingRef.current);
+            pendingRef.current = null;
+          }
+        }
+        onBlur?.();
+      }}
+      placeholder={placeholder}
+      spellCheck={spellCheck}
+      suppressHydrationWarning
+      className={className}
+    />
+  );
+}
+
 function ContextBar({
   selected,
   multiCount = 0,
@@ -3156,13 +3246,12 @@ function ContextBar({
         <>
           <Sep />
           <span className="text-[11px] text-zinc-500">y =</span>
-          <input
+          <DebouncedInput
             value={selected.expr}
             onFocus={onBeginEdit}
-            onChange={(e) => onUpdate({ expr: e.target.value })}
+            onCommit={(v) => onUpdate({ expr: v })}
             placeholder="\sin(x)"
             spellCheck={false}
-            suppressHydrationWarning
             className={`${inputCls} w-56 font-mono`}
           />
           <span className="text-[11px] text-zinc-500">x</span>
