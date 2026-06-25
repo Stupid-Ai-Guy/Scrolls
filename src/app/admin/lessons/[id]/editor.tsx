@@ -643,6 +643,12 @@ function QuestionEditor({
         suppressHydrationWarning
         className={fieldClass}
       />
+      <p className="-mt-2 text-[11px] text-zinc-500">
+        Math: wrap LaTeX in <code className="text-zinc-300">$…$</code> for
+        inline (e.g. <code className="text-zinc-300">$\sin(x)$</code>) or{" "}
+        <code className="text-zinc-300">$$…$$</code> for display. Works in
+        the prompt, options, and explanation.
+      </p>
 
       <div>
         <p className="mb-2 text-xs font-medium uppercase tracking-wider text-zinc-500">

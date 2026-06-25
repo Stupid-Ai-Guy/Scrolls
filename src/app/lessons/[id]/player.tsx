@@ -12,6 +12,7 @@ import type {
 import { recordLessonCompletionAction } from "@/lib/actions";
 import ScrollScriptRunner from "@/components/scrollscript-runner";
 import { SceneRunner } from "@/components/scene-editor";
+import { RichText } from "@/lib/rich-text";
 import {
   gradeLongLabel,
   gradeParam,
@@ -422,7 +423,11 @@ function QuestionView({
         Question
       </p>
       <h2 className="mt-2 text-xl font-semibold tracking-tight text-zinc-100">
-        {block.prompt || "Untitled question"}
+        {block.prompt ? (
+          <RichText source={block.prompt} />
+        ) : (
+          "Untitled question"
+        )}
       </h2>
 
       {block.imageUrl && (
@@ -473,7 +478,9 @@ function QuestionView({
               >
                 {String.fromCharCode(65 + i)}
               </span>
-              <span className="text-zinc-100">{opt || "(empty)"}</span>
+              <span className="text-zinc-100">
+                {opt ? <RichText source={opt} /> : "(empty)"}
+              </span>
             </button>
           );
         })}
@@ -492,7 +499,9 @@ function QuestionView({
             {isCorrect ? "Correct" : "Not quite"}
           </p>
           {block.explanation && (
-            <p className="mt-1 text-zinc-300">{block.explanation}</p>
+            <p className="mt-1 text-zinc-300">
+              <RichText source={block.explanation} />
+            </p>
           )}
           {!isCorrect && !block.explanation && (
             <p className="mt-1 text-zinc-300">
@@ -520,7 +529,7 @@ function InteractiveView({
       </p>
       {block.prompt && (
         <h2 className="mt-2 text-xl font-semibold tracking-tight text-zinc-100">
-          {block.prompt}
+          <RichText source={block.prompt} />
         </h2>
       )}
       {block.imageUrl && (
