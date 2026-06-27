@@ -106,6 +106,18 @@ export type SceneShape =
       ymin?: number;
       ymax?: number;
       samples?: number;
+    }
+  | {
+      id: string;
+      kind: "code";
+      x: number;
+      y: number;
+      w?: number;
+      h?: number;
+      source: string;
+      color: string;
+      output?: string;
+      error?: boolean;
     };
 
 export type Scene = {

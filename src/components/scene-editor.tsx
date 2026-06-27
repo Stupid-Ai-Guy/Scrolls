@@ -3,6 +3,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import katex from "katex";
 import { ComputeEngine } from "@cortex-js/compute-engine";
+import CodeMirror from "@uiw/react-codemirror";
+import { javascript } from "@codemirror/lang-javascript";
+import { oneDark } from "@codemirror/theme-one-dark";
 // KaTeX stylesheet is loaded by the root layout (src/app/layout.tsx) so
 // it's present on every page before this client component renders.
 import type { Scene, SceneShape } from "@/lib/lesson-content";
@@ -244,6 +247,17 @@ function makeShape(kind: SceneShape["kind"], wx: number, wy: number): SceneShape
         ymin: -3,
         ymax: 3,
       };
+    case "code":
+      return {
+        id,
+        kind,
+        x: round(wx),
+        y: round(wy),
+        w: 10,
+        h: 8,
+        source: "// Try: console.log('hello')\n",
+        color: "amber",
+      };
   }
 }
 
@@ -390,6 +404,25 @@ function FunctionIcon() {
   );
 }
 
+function JsIcon() {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      className="h-5 w-5"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      {/* angle brackets + slash, the universal "code" glyph */}
+      <path d="M8 6 L3 12 L8 18" />
+      <path d="M16 6 L21 12 L16 18" />
+      <path d="M14 5 L10 19" opacity="0.6" />
+    </svg>
+  );
+}
+
 function ButtonIcon() {
   return (
     <svg
@@ -526,8 +559,8 @@ type RendererProps = {
 function shapeTopAnchor(s: SceneShape): { x: number; y: number } {
   if (s.kind === "point" || s.kind === "text" || s.kind === "latex")
     return { x: s.x, y: s.y };
-  if (s.kind === "function") {
-    const h = s.h ?? 6;
+  if (s.kind === "function" || s.kind === "code") {
+    const h = s.h ?? (s.kind === "function" ? 6 : 8);
     return { x: s.x, y: s.y + h / 2 };
   }
   if (s.kind === "line")
@@ -550,9 +583,11 @@ function shapeBBox(s: SceneShape): {
   if (s.kind === "point" || s.kind === "text" || s.kind === "latex") {
     return { minX: s.x, minY: s.y, maxX: s.x, maxY: s.y };
   }
-  if (s.kind === "function") {
-    const w = s.w ?? 8;
-    const h = s.h ?? 6;
+  if (s.kind === "function" || s.kind === "code") {
+    const defaultW = s.kind === "function" ? 8 : 10;
+    const defaultH = s.kind === "function" ? 6 : 8;
+    const w = s.w ?? defaultW;
+    const h = s.h ?? defaultH;
     return {
       minX: s.x - w / 2,
       minY: s.y - h / 2,
@@ -1198,6 +1233,7 @@ function SceneCanvas({
             onContextMenu: editable
               ? (e) => handleShapeContextMenu(e, s)
               : undefined,
+            onUpdate: onUpdateShape,
           }),
         )}
 
@@ -1245,7 +1281,8 @@ function movePatch(s: SceneShape, dxw: number, dyw: number): Partial<SceneShape>
     s.kind === "point" ||
     s.kind === "text" ||
     s.kind === "latex" ||
-    s.kind === "function"
+    s.kind === "function" ||
+    s.kind === "code"
   ) {
     return { x: round(s.x + dxw), y: round(s.y + dyw) };
   }
@@ -1292,20 +1329,27 @@ function resizePatch(
     const r = Math.max(0.05, Math.hypot(wx - s.cx, wy - s.cy));
     return { r: roundFine(r) };
   }
-  if (s.kind === "rect" || s.kind === "button" || s.kind === "function") {
-    // function uses (x,y) for the box center; rect/button use (cx,cy).
+  if (
+    s.kind === "rect" ||
+    s.kind === "button" ||
+    s.kind === "function" ||
+    s.kind === "code"
+  ) {
+    // function/code use (x,y) for the box center; rect/button use (cx,cy).
     // Normalize while computing, then write back to the correct field names.
-    const isFn = s.kind === "function";
-    const cx = isFn ? s.x : s.cx;
-    const cy = isFn ? s.y : s.cy;
-    const w0 = isFn ? s.w ?? 8 : s.w;
-    const h0 = isFn ? s.h ?? 6 : s.h;
+    const xyShape = s.kind === "function" || s.kind === "code";
+    const defaultW = s.kind === "function" ? 8 : s.kind === "code" ? 10 : 8;
+    const defaultH = s.kind === "function" ? 6 : s.kind === "code" ? 8 : 6;
+    const cx = xyShape ? s.x : s.cx;
+    const cy = xyShape ? s.y : s.cy;
+    const w0 = xyShape ? s.w ?? defaultW : s.w;
+    const h0 = xyShape ? s.h ?? defaultH : s.h;
     const left = cx - w0 / 2;
     const right = cx + w0 / 2;
     const top = cy + h0 / 2;
     const bottom = cy - h0 / 2;
     const patch = (ncx: number, ncy: number, nw?: number, nh?: number) => {
-      const base: Record<string, number> = isFn
+      const base: Record<string, number> = xyShape
         ? { x: round(ncx), y: round(ncy) }
         : { cx: round(ncx), cy: round(ncy) };
       if (nw !== undefined) base.w = roundFine(nw);
@@ -1409,11 +1453,19 @@ function renderHandles(
       </g>
     );
   }
-  if (s.kind === "rect" || s.kind === "button" || s.kind === "function") {
-    const cx = s.kind === "function" ? s.x : s.cx;
-    const cy = s.kind === "function" ? s.y : s.cy;
-    const w = s.kind === "function" ? s.w ?? 8 : s.w;
-    const h = s.kind === "function" ? s.h ?? 6 : s.h;
+  if (
+    s.kind === "rect" ||
+    s.kind === "button" ||
+    s.kind === "function" ||
+    s.kind === "code"
+  ) {
+    const xyShape = s.kind === "function" || s.kind === "code";
+    const cx = xyShape ? s.x : s.cx;
+    const cy = xyShape ? s.y : s.cy;
+    const defaultW = s.kind === "function" ? 8 : s.kind === "code" ? 10 : 8;
+    const defaultH = s.kind === "function" ? 6 : s.kind === "code" ? 8 : 6;
+    const w = xyShape ? s.w ?? defaultW : s.w;
+    const h = xyShape ? s.h ?? defaultH : s.h;
     const left = cx - w / 2;
     const right = cx + w / 2;
     const top = cy + h / 2;
@@ -1451,6 +1503,7 @@ function renderShape(
     onClick?: (buttonId: string) => void;
     onMouseDown?: (e: React.MouseEvent<SVGGElement>) => void;
     onContextMenu?: (e: React.MouseEvent<SVGGElement>) => void;
+    onUpdate?: (id: string, patch: Partial<SceneShape>) => void;
   },
 ) {
   const color = COLORS[s.color] ?? s.color;
@@ -1662,6 +1715,20 @@ function renderShape(
           {s.text}
         </text>
       </g>
+    );
+  }
+  if (s.kind === "code") {
+    return (
+      <CodeShape
+        key={s.id}
+        s={s}
+        toX={toX}
+        toY={toY}
+        isSelected={isSelected}
+        color={color}
+        interact={interact}
+        onUpdate={ctx.onUpdate}
+      />
     );
   }
   if (s.kind === "function") {
@@ -2240,7 +2307,8 @@ export function SceneEditor({
       shape.kind === "point" ||
       shape.kind === "text" ||
       shape.kind === "latex" ||
-      shape.kind === "function"
+      shape.kind === "function" ||
+      shape.kind === "code"
     ) {
       return {
         ...shape,
@@ -2433,8 +2501,11 @@ export function SceneEditor({
 
       const mod = e.metaKey || e.ctrlKey;
 
-      // Undo/redo work everywhere
+      // Undo/redo work everywhere except inside an editable field, where
+      // the field's own undo/redo (e.g. CodeMirror, plain inputs) takes
+      // precedence over the scene history.
       if (mod && !e.shiftKey && e.key.toLowerCase() === "z") {
+        if (inField) return;
         e.preventDefault();
         undo();
         return;
@@ -2444,6 +2515,7 @@ export function SceneEditor({
         (e.key.toLowerCase() === "y" ||
           (e.shiftKey && e.key.toLowerCase() === "z"))
       ) {
+        if (inField) return;
         e.preventDefault();
         redo();
         return;
@@ -2646,6 +2718,7 @@ const TOOL_COLORS = {
   text: { idle: "text-violet-300", active: "bg-violet-500/15 text-violet-200" },
   latex: { idle: "text-violet-300", active: "bg-violet-500/15 text-violet-200" },
   function: { idle: "text-cyan-300", active: "bg-cyan-500/15 text-cyan-200" },
+  code: { idle: "text-emerald-300", active: "bg-emerald-500/15 text-emerald-200" },
   button: { idle: "text-amber-300", active: "bg-amber-500/15 text-amber-200" },
   viewport: { idle: "text-amber-300", active: "bg-amber-500/15 text-amber-200" },
   canvas: { idle: "text-zinc-400", active: "bg-zinc-700/40 text-zinc-100" },
@@ -2874,6 +2947,15 @@ function Sidebar({
       </ToolButton>
 
       <ToolButton
+        label="JS — JavaScript runner"
+        active={activeTool === "code"}
+        tone={TOOL_COLORS.code}
+        onClick={() => onSelectTool("code")}
+      >
+        <JsIcon />
+      </ToolButton>
+
+      <ToolButton
         label="Viewport — drag a rect to set the preview frame"
         active={activeTool === "viewport"}
         tone={TOOL_COLORS.viewport}
@@ -2966,6 +3048,266 @@ function FlyoutItem({
     >
       {children}
     </button>
+  );
+}
+
+// ---------------- JS code shape ----------------
+
+function formatJsValue(v: unknown): string {
+  if (v === undefined) return "undefined";
+  if (v === null) return "null";
+  if (typeof v === "string") return v;
+  if (typeof v === "number" || typeof v === "boolean") return String(v);
+  if (typeof v === "function") return `[Function ${v.name || "anonymous"}]`;
+  try {
+    return JSON.stringify(v);
+  } catch {
+    return String(v);
+  }
+}
+
+function runJsSource(source: string): { ok: boolean; output: string } {
+  const logs: string[] = [];
+  const consoleStub = {
+    log: (...args: unknown[]) => logs.push(args.map(formatJsValue).join(" ")),
+    error: (...args: unknown[]) =>
+      logs.push("Error: " + args.map(formatJsValue).join(" ")),
+    warn: (...args: unknown[]) =>
+      logs.push("Warn: " + args.map(formatJsValue).join(" ")),
+    info: (...args: unknown[]) => logs.push(args.map(formatJsValue).join(" ")),
+  };
+  try {
+    const fn = new Function("console", `"use strict";\n${source}`);
+    const result = fn(consoleStub);
+    if (result !== undefined) logs.push("→ " + formatJsValue(result));
+    return { ok: true, output: logs.join("\n") };
+  } catch (e) {
+    const msg = e instanceof Error ? `${e.name}: ${e.message}` : String(e);
+    return { ok: false, output: [...logs, msg].join("\n") };
+  }
+}
+
+function CodeShape({
+  s,
+  toX,
+  toY,
+  isSelected,
+  color,
+  interact,
+  onUpdate,
+}: {
+  s: SceneShape & { kind: "code" };
+  toX: (wx: number) => number;
+  toY: (wy: number) => number;
+  isSelected: boolean;
+  color: string;
+  interact: {
+    onMouseDown?: (e: React.MouseEvent<SVGGElement>) => void;
+    onContextMenu?: (e: React.MouseEvent<SVGGElement>) => void;
+    style?: React.CSSProperties;
+  };
+  onUpdate?: (id: string, patch: Partial<SceneShape>) => void;
+}) {
+  const w = s.w ?? 10;
+  const h = s.h ?? 8;
+  const left = toX(s.x - w / 2);
+  const right = toX(s.x + w / 2);
+  const top = toY(s.y + h / 2);
+  const bottom = toY(s.y - h / 2);
+  const boxW = right - left;
+  const boxH = bottom - top;
+
+  const headerH = 28;
+  const outputH = s.output ? Math.min(boxH * 0.35, 120) : 0;
+
+  // Editing state is local; we only push the source up to the shape on a
+  // small debounce so each keystroke doesn't ripple through the whole scene.
+  const [localSource, setLocalSource] = useState(s.source);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pendingRef = useRef<string | null>(null);
+
+  useEffect(() => setLocalSource(s.source), [s.source]);
+  useEffect(
+    () => () => {
+      if (timerRef.current) clearTimeout(timerRef.current);
+    },
+    [],
+  );
+
+  const handleSourceChange = (v: string) => {
+    setLocalSource(v);
+    pendingRef.current = v;
+    if (timerRef.current) clearTimeout(timerRef.current);
+    timerRef.current = setTimeout(() => {
+      timerRef.current = null;
+      pendingRef.current = null;
+      onUpdate?.(s.id, { source: v });
+    }, 250);
+  };
+
+  const handleRun = () => {
+    // Flush any pending source first so we run what the user sees.
+    if (timerRef.current) {
+      clearTimeout(timerRef.current);
+      timerRef.current = null;
+      pendingRef.current = null;
+    }
+    const result = runJsSource(localSource);
+    onUpdate?.(s.id, {
+      source: localSource,
+      output: result.output,
+      error: !result.ok,
+    });
+  };
+
+  // Stop pointer events that originate inside the editor from bubbling up
+  // to the shape's drag handler. Header bar and the box outline still drag.
+  const stopDrag = (e: React.MouseEvent) => {
+    e.stopPropagation();
+  };
+
+  return (
+    <g key={s.id} {...interact}>
+      <rect
+        x={left}
+        y={top}
+        width={boxW}
+        height={boxH}
+        fill="#18181b"
+        stroke={color}
+        strokeOpacity="0.6"
+        strokeWidth="1.5"
+        rx="6"
+        ry="6"
+      />
+      <foreignObject
+        x={left}
+        y={top}
+        width={boxW}
+        height={boxH}
+      >
+        <div
+          style={{
+            width: "100%",
+            height: "100%",
+            display: "flex",
+            flexDirection: "column",
+            overflow: "hidden",
+            borderRadius: 6,
+            fontFamily: "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace",
+            color: "#e4e4e7",
+          }}
+        >
+          {/* Header — draggable area. No stopPropagation so mousedowns bubble
+              up to the parent <g>'s interact handlers. */}
+          <div
+            style={{
+              height: headerH,
+              flex: "0 0 auto",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              padding: "0 10px",
+              background: "#27272a",
+              borderBottom: "1px solid #3f3f46",
+              cursor: interact.style?.cursor ?? "default",
+              userSelect: "none",
+              fontSize: 12,
+              letterSpacing: "0.04em",
+            }}
+          >
+            <span style={{ color: "#a1a1aa", fontWeight: 600 }}>JS</span>
+            <button
+              type="button"
+              onMouseDown={stopDrag}
+              onClick={(e) => {
+                e.stopPropagation();
+                handleRun();
+              }}
+              style={{
+                background: "#10b981",
+                color: "#052e1f",
+                border: "none",
+                borderRadius: 4,
+                padding: "3px 10px",
+                fontSize: 11,
+                fontWeight: 700,
+                cursor: "pointer",
+              }}
+            >
+              Run
+            </button>
+          </div>
+          {/* Editor — stopPropagation so typing / selection inside doesn't
+              start a shape drag. */}
+          <div
+            onMouseDown={stopDrag}
+            onMouseMove={stopDrag}
+            onClick={stopDrag}
+            style={{
+              flex: "1 1 auto",
+              overflow: "auto",
+              minHeight: 0,
+            }}
+          >
+            <CodeMirror
+              value={localSource}
+              onChange={handleSourceChange}
+              extensions={[javascript()]}
+              theme={oneDark}
+              basicSetup={{
+                lineNumbers: true,
+                foldGutter: false,
+                autocompletion: true,
+                closeBrackets: true,
+                bracketMatching: true,
+                highlightActiveLine: true,
+                highlightActiveLineGutter: true,
+                indentOnInput: true,
+              }}
+              height="100%"
+              style={{ height: "100%", fontSize: 13 }}
+            />
+          </div>
+          {/* Output — only rendered when there's something to show, sized
+              proportional to the box. */}
+          {outputH > 0 && (
+            <div
+              onMouseDown={stopDrag}
+              style={{
+                height: outputH,
+                flex: "0 0 auto",
+                overflow: "auto",
+                borderTop: "1px solid #3f3f46",
+                background: s.error ? "#3f1d1d" : "#18181b",
+                color: s.error ? "#fca5a5" : "#a7f3d0",
+                padding: "6px 10px",
+                fontSize: 12,
+                whiteSpace: "pre-wrap",
+                wordBreak: "break-word",
+              }}
+            >
+              {s.output}
+            </div>
+          )}
+        </div>
+      </foreignObject>
+      {isSelected && (
+        <rect
+          x={left}
+          y={top}
+          width={boxW}
+          height={boxH}
+          fill="none"
+          stroke="#22d3ee"
+          strokeWidth="2"
+          strokeDasharray="4 2"
+          rx="6"
+          ry="6"
+          pointerEvents="none"
+        />
+      )}
+    </g>
   );
 }
 
