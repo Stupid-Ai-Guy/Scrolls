@@ -116,9 +116,7 @@ export type SceneShape =
       h?: number;
       source: string;
       color: string;
-      output?: string;
-      error?: boolean;
-      produced?: SceneShape[];
+      error?: string;
     };
 
 export type Scene = {

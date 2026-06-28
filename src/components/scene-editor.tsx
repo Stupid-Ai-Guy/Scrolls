@@ -256,13 +256,17 @@ function makeShape(kind: SceneShape["kind"], wx: number, wy: number): SceneShape
         w: 10,
         h: 8,
         source:
-          "// draw.point/line/circle/rect/text(...) put shapes on the canvas.\n" +
-          "// draw.clear() removes anything drawn earlier in this run.\n" +
-          "// console.log goes to the output panel below.\n" +
+          "// `ctx` is a CanvasRenderingContext2D, `width` and `height` are\n" +
+          "// the canvas size in CSS pixels. Draw with the standard API.\n" +
           "\n" +
-          "for (let i = -5; i <= 5; i++) {\n" +
-          "  draw.point(i, i * 0.5);\n" +
-          "}\n",
+          "ctx.fillStyle = '#22d3ee';\n" +
+          "ctx.fillRect(20, 20, 80, 50);\n" +
+          "\n" +
+          "ctx.strokeStyle = '#f59e0b';\n" +
+          "ctx.lineWidth = 3;\n" +
+          "ctx.beginPath();\n" +
+          "ctx.arc(width / 2, height / 2, 30, 0, Math.PI * 2);\n" +
+          "ctx.stroke();\n",
         color: "amber",
       };
   }
@@ -1731,7 +1735,6 @@ function renderShape(
         s={s}
         toX={toX}
         toY={toY}
-        dx={dx}
         isSelected={isSelected}
         color={color}
         interact={interact}
@@ -3061,112 +3064,28 @@ function FlyoutItem({
 
 // ---------------- JS code shape ----------------
 
-function formatJsValue(v: unknown): string {
-  if (v === undefined) return "undefined";
-  if (v === null) return "null";
-  if (typeof v === "string") return v;
-  if (typeof v === "number" || typeof v === "boolean") return String(v);
-  if (typeof v === "function") return `[Function ${v.name || "anonymous"}]`;
+function runJsOnCanvas(
+  source: string,
+  ctx: CanvasRenderingContext2D,
+  canvas: HTMLCanvasElement,
+): { ok: boolean; error: string | null } {
   try {
-    return JSON.stringify(v);
-  } catch {
-    return String(v);
-  }
-}
-
-function runJsSource(source: string): {
-  ok: boolean;
-  output: string;
-  produced: SceneShape[];
-} {
-  const logs: string[] = [];
-  const produced: SceneShape[] = [];
-  const consoleStub = {
-    log: (...args: unknown[]) => logs.push(args.map(formatJsValue).join(" ")),
-    error: (...args: unknown[]) =>
-      logs.push("Error: " + args.map(formatJsValue).join(" ")),
-    warn: (...args: unknown[]) =>
-      logs.push("Warn: " + args.map(formatJsValue).join(" ")),
-    info: (...args: unknown[]) => logs.push(args.map(formatJsValue).join(" ")),
-  };
-  // World-coordinate drawing API exposed to user code. Each call appends a
-  // SceneShape that the renderer later draws on the canvas alongside the
-  // user's own shapes. draw.clear() drops everything drawn so far in the
-  // current run.
-  const draw = {
-    point: (x: number, y: number, color: string = "emerald") =>
-      produced.push({
-        id: uid(),
-        kind: "point",
-        x: Number(x),
-        y: Number(y),
-        color,
-        label: "",
-      }),
-    line: (
-      x1: number,
-      y1: number,
-      x2: number,
-      y2: number,
-      color: string = "sky",
-    ) =>
-      produced.push({
-        id: uid(),
-        kind: "line",
-        x1: Number(x1),
-        y1: Number(y1),
-        x2: Number(x2),
-        y2: Number(y2),
-        color,
-      }),
-    circle: (cx: number, cy: number, r: number, color: string = "emerald") =>
-      produced.push({
-        id: uid(),
-        kind: "circle",
-        cx: Number(cx),
-        cy: Number(cy),
-        r: Number(r),
-        color,
-        label: "",
-      }),
-    rect: (
-      cx: number,
-      cy: number,
-      w: number,
-      h: number,
-      color: string = "slate",
-    ) =>
-      produced.push({
-        id: uid(),
-        kind: "rect",
-        cx: Number(cx),
-        cy: Number(cy),
-        w: Number(w),
-        h: Number(h),
-        color,
-        label: "",
-      }),
-    text: (x: number, y: number, text: unknown, color: string = "slate") =>
-      produced.push({
-        id: uid(),
-        kind: "text",
-        x: Number(x),
-        y: Number(y),
-        text: String(text),
-        color,
-      }),
-    clear: () => {
-      produced.length = 0;
-    },
-  };
-  try {
-    const fn = new Function("console", "draw", `"use strict";\n${source}`);
-    const result = fn(consoleStub, draw);
-    if (result !== undefined) logs.push("→ " + formatJsValue(result));
-    return { ok: true, output: logs.join("\n"), produced };
+    // ctx, canvas, width, height are the entire surface exposed to user
+    // code. console.log goes through the browser console as usual.
+    const fn = new Function(
+      "ctx",
+      "canvas",
+      "width",
+      "height",
+      `"use strict";\n${source}`,
+    );
+    fn(ctx, canvas, canvas.clientWidth, canvas.clientHeight);
+    return { ok: true, error: null };
   } catch (e) {
-    const msg = e instanceof Error ? `${e.name}: ${e.message}` : String(e);
-    return { ok: false, output: [...logs, msg].join("\n"), produced };
+    return {
+      ok: false,
+      error: e instanceof Error ? `${e.name}: ${e.message}` : String(e),
+    };
   }
 }
 
@@ -3174,7 +3093,6 @@ function CodeShape({
   s,
   toX,
   toY,
-  dx,
   isSelected,
   color,
   interact,
@@ -3183,7 +3101,6 @@ function CodeShape({
   s: SceneShape & { kind: "code" };
   toX: (wx: number) => number;
   toY: (wy: number) => number;
-  dx: number;
   isSelected: boolean;
   color: string;
   interact: {
@@ -3203,13 +3120,14 @@ function CodeShape({
   const boxH = bottom - top;
 
   const headerH = 28;
-  const outputH = s.output ? Math.min(boxH * 0.35, 120) : 0;
+  const errorH = s.error ? 22 : 0;
 
   // Editing state is local; we only push the source up to the shape on a
   // small debounce so each keystroke doesn't ripple through the whole scene.
   const [localSource, setLocalSource] = useState(s.source);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pendingRef = useRef<string | null>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
 
   useEffect(() => setLocalSource(s.source), [s.source]);
   useEffect(
@@ -3237,35 +3155,35 @@ function CodeShape({
       timerRef.current = null;
       pendingRef.current = null;
     }
-    const result = runJsSource(localSource);
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    // Match the backing-store resolution to the CSS size × devicePixelRatio
+    // so canvas drawing stays crisp on HiDPI displays. The user code still
+    // works in CSS pixels because we apply a matching transform.
+    const dpr = window.devicePixelRatio || 1;
+    const cssW = canvas.clientWidth;
+    const cssH = canvas.clientHeight;
+    canvas.width = Math.max(1, Math.floor(cssW * dpr));
+    canvas.height = Math.max(1, Math.floor(cssH * dpr));
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, cssW, cssH);
+    const result = runJsOnCanvas(localSource, ctx, canvas);
     onUpdate?.(s.id, {
       source: localSource,
-      output: result.output,
-      error: !result.ok,
-      produced: result.produced,
+      error: result.ok ? undefined : result.error ?? undefined,
     });
   };
 
   // Stop pointer events that originate inside the editor from bubbling up
-  // to the shape's drag handler. Header bar and the box outline still drag.
+  // to the shape's drag handler. Header bar still drags.
   const stopDrag = (e: React.MouseEvent) => {
     e.stopPropagation();
   };
 
   return (
-    <g key={s.id}>
-      {/* Shapes produced by the last run live in world coords; render them
-          here (outside the box's foreignObject) so they sit on the canvas
-          rather than being clipped into the editor area. Non-interactive so
-          they never compete with normal shapes for selection. */}
-      {(s.produced ?? []).length > 0 && (
-        <g pointerEvents="none">
-          {(s.produced ?? []).map((p) =>
-            renderShape(p, toX, toY, dx, {}),
-          )}
-        </g>
-      )}
-      <g {...interact}>
+    <g key={s.id} {...interact}>
       <rect
         x={left}
         y={top}
@@ -3278,12 +3196,7 @@ function CodeShape({
         rx="6"
         ry="6"
       />
-      <foreignObject
-        x={left}
-        y={top}
-        width={boxW}
-        height={boxH}
-      >
+      <foreignObject x={left} y={top} width={boxW} height={boxH}>
         <div
           style={{
             width: "100%",
@@ -3292,12 +3205,13 @@ function CodeShape({
             flexDirection: "column",
             overflow: "hidden",
             borderRadius: 6,
-            fontFamily: "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace",
+            fontFamily:
+              "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace",
             color: "#e4e4e7",
           }}
         >
-          {/* Header — draggable area. No stopPropagation so mousedowns bubble
-              up to the parent <g>'s interact handlers. */}
+          {/* Header — draggable area. No stopPropagation so mousedowns
+              bubble up to the parent <g>'s interact handlers. */}
           <div
             style={{
               height: headerH,
@@ -3337,13 +3251,13 @@ function CodeShape({
             </button>
           </div>
           {/* Editor — stopPropagation so typing / selection inside doesn't
-              start a shape drag. */}
+              start a shape drag. Top half of the body. */}
           <div
             onMouseDown={stopDrag}
             onMouseMove={stopDrag}
             onClick={stopDrag}
             style={{
-              flex: "1 1 auto",
+              flex: "1 1 55%",
               overflow: "auto",
               minHeight: 0,
             }}
@@ -3367,25 +3281,39 @@ function CodeShape({
               style={{ height: "100%", fontSize: 13 }}
             />
           </div>
-          {/* Output — only rendered when there's something to show, sized
-              proportional to the box. */}
-          {outputH > 0 && (
+          {/* Canvas — bottom half. User code draws here via ctx. */}
+          <canvas
+            ref={canvasRef}
+            onMouseDown={stopDrag}
+            onMouseMove={stopDrag}
+            onClick={stopDrag}
+            style={{
+              flex: "1 1 45%",
+              minHeight: 0,
+              width: "100%",
+              background: "#0a0a0c",
+              borderTop: "1px solid #3f3f46",
+              display: "block",
+            }}
+          />
+          {errorH > 0 && (
             <div
               onMouseDown={stopDrag}
               style={{
-                height: outputH,
+                height: errorH,
                 flex: "0 0 auto",
-                overflow: "auto",
-                borderTop: "1px solid #3f3f46",
-                background: s.error ? "#3f1d1d" : "#18181b",
-                color: s.error ? "#fca5a5" : "#a7f3d0",
-                padding: "6px 10px",
-                fontSize: 12,
-                whiteSpace: "pre-wrap",
-                wordBreak: "break-word",
+                background: "#3f1d1d",
+                color: "#fca5a5",
+                padding: "2px 10px",
+                fontSize: 11,
+                whiteSpace: "nowrap",
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+                borderTop: "1px solid #7f1d1d",
               }}
+              title={s.error}
             >
-              {s.output}
+              {s.error}
             </div>
           )}
         </div>
@@ -3405,7 +3333,6 @@ function CodeShape({
           pointerEvents="none"
         />
       )}
-      </g>
     </g>
   );
 }
