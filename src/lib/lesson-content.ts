@@ -118,6 +118,7 @@ export type SceneShape =
       color: string;
       output?: string;
       error?: boolean;
+      produced?: SceneShape[];
     };
 
 export type Scene = {

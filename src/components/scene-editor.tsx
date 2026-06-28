@@ -255,7 +255,14 @@ function makeShape(kind: SceneShape["kind"], wx: number, wy: number): SceneShape
         y: round(wy),
         w: 10,
         h: 8,
-        source: "// Try: console.log('hello')\n",
+        source:
+          "// draw.point/line/circle/rect/text(...) put shapes on the canvas.\n" +
+          "// draw.clear() removes anything drawn earlier in this run.\n" +
+          "// console.log goes to the output panel below.\n" +
+          "\n" +
+          "for (let i = -5; i <= 5; i++) {\n" +
+          "  draw.point(i, i * 0.5);\n" +
+          "}\n",
         color: "amber",
       };
   }
@@ -1724,6 +1731,7 @@ function renderShape(
         s={s}
         toX={toX}
         toY={toY}
+        dx={dx}
         isSelected={isSelected}
         color={color}
         interact={interact}
@@ -3066,8 +3074,13 @@ function formatJsValue(v: unknown): string {
   }
 }
 
-function runJsSource(source: string): { ok: boolean; output: string } {
+function runJsSource(source: string): {
+  ok: boolean;
+  output: string;
+  produced: SceneShape[];
+} {
   const logs: string[] = [];
+  const produced: SceneShape[] = [];
   const consoleStub = {
     log: (...args: unknown[]) => logs.push(args.map(formatJsValue).join(" ")),
     error: (...args: unknown[]) =>
@@ -3076,14 +3089,84 @@ function runJsSource(source: string): { ok: boolean; output: string } {
       logs.push("Warn: " + args.map(formatJsValue).join(" ")),
     info: (...args: unknown[]) => logs.push(args.map(formatJsValue).join(" ")),
   };
+  // World-coordinate drawing API exposed to user code. Each call appends a
+  // SceneShape that the renderer later draws on the canvas alongside the
+  // user's own shapes. draw.clear() drops everything drawn so far in the
+  // current run.
+  const draw = {
+    point: (x: number, y: number, color: string = "emerald") =>
+      produced.push({
+        id: uid(),
+        kind: "point",
+        x: Number(x),
+        y: Number(y),
+        color,
+        label: "",
+      }),
+    line: (
+      x1: number,
+      y1: number,
+      x2: number,
+      y2: number,
+      color: string = "sky",
+    ) =>
+      produced.push({
+        id: uid(),
+        kind: "line",
+        x1: Number(x1),
+        y1: Number(y1),
+        x2: Number(x2),
+        y2: Number(y2),
+        color,
+      }),
+    circle: (cx: number, cy: number, r: number, color: string = "emerald") =>
+      produced.push({
+        id: uid(),
+        kind: "circle",
+        cx: Number(cx),
+        cy: Number(cy),
+        r: Number(r),
+        color,
+        label: "",
+      }),
+    rect: (
+      cx: number,
+      cy: number,
+      w: number,
+      h: number,
+      color: string = "slate",
+    ) =>
+      produced.push({
+        id: uid(),
+        kind: "rect",
+        cx: Number(cx),
+        cy: Number(cy),
+        w: Number(w),
+        h: Number(h),
+        color,
+        label: "",
+      }),
+    text: (x: number, y: number, text: unknown, color: string = "slate") =>
+      produced.push({
+        id: uid(),
+        kind: "text",
+        x: Number(x),
+        y: Number(y),
+        text: String(text),
+        color,
+      }),
+    clear: () => {
+      produced.length = 0;
+    },
+  };
   try {
-    const fn = new Function("console", `"use strict";\n${source}`);
-    const result = fn(consoleStub);
+    const fn = new Function("console", "draw", `"use strict";\n${source}`);
+    const result = fn(consoleStub, draw);
     if (result !== undefined) logs.push("→ " + formatJsValue(result));
-    return { ok: true, output: logs.join("\n") };
+    return { ok: true, output: logs.join("\n"), produced };
   } catch (e) {
     const msg = e instanceof Error ? `${e.name}: ${e.message}` : String(e);
-    return { ok: false, output: [...logs, msg].join("\n") };
+    return { ok: false, output: [...logs, msg].join("\n"), produced };
   }
 }
 
@@ -3091,6 +3174,7 @@ function CodeShape({
   s,
   toX,
   toY,
+  dx,
   isSelected,
   color,
   interact,
@@ -3099,6 +3183,7 @@ function CodeShape({
   s: SceneShape & { kind: "code" };
   toX: (wx: number) => number;
   toY: (wy: number) => number;
+  dx: number;
   isSelected: boolean;
   color: string;
   interact: {
@@ -3157,6 +3242,7 @@ function CodeShape({
       source: localSource,
       output: result.output,
       error: !result.ok,
+      produced: result.produced,
     });
   };
 
@@ -3167,7 +3253,19 @@ function CodeShape({
   };
 
   return (
-    <g key={s.id} {...interact}>
+    <g key={s.id}>
+      {/* Shapes produced by the last run live in world coords; render them
+          here (outside the box's foreignObject) so they sit on the canvas
+          rather than being clipped into the editor area. Non-interactive so
+          they never compete with normal shapes for selection. */}
+      {(s.produced ?? []).length > 0 && (
+        <g pointerEvents="none">
+          {(s.produced ?? []).map((p) =>
+            renderShape(p, toX, toY, dx, {}),
+          )}
+        </g>
+      )}
+      <g {...interact}>
       <rect
         x={left}
         y={top}
@@ -3307,6 +3405,7 @@ function CodeShape({
           pointerEvents="none"
         />
       )}
+      </g>
     </g>
   );
 }
