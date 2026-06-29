@@ -45,6 +45,9 @@ export default async function LessonEditorPage({
       initialGrade={lesson.grade}
       initialCategoryId={lesson.category_id ?? null}
       initialBlocks={content.blocks}
+      initialRepetitionSets={
+        content.repetitionSets ?? { day1: [], day3: [] }
+      }
       categories={categories.map((c) => ({
         id: c.id,
         subject: c.subject,

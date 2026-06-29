@@ -10,6 +10,7 @@ import {
   type ImageBlock,
   type InteractiveBlock,
   type QuestionBlock,
+  type RepetitionSets,
   type TextBlock,
 } from "@/lib/lesson-content";
 import {
@@ -51,6 +52,7 @@ export default function LessonEditor({
   initialGrade,
   initialCategoryId,
   initialBlocks,
+  initialRepetitionSets,
   categories,
 }: {
   lessonId: number;
@@ -60,6 +62,7 @@ export default function LessonEditor({
   initialGrade: number;
   initialCategoryId: number | null;
   initialBlocks: Block[];
+  initialRepetitionSets: RepetitionSets;
   categories: CategoryOption[];
 }) {
   const [title, setTitle] = useState(initialTitle);
@@ -72,6 +75,13 @@ export default function LessonEditor({
   const [blocks, setBlocks] = useState<EditorBlock[]>(
     initialBlocks.map(withKey),
   );
+  const [repetitionSets, setRepetitionSets] = useState<RepetitionSets>(
+    initialRepetitionSets,
+  );
+  const [repetitionOpen, setRepetitionOpen] = useState(false);
+
+  const repetitionCount =
+    repetitionSets.day1.length + repetitionSets.day3.length;
 
   const availableCategories = categories.filter(
     (c) => c.subject === subject && c.grade === grade,
@@ -145,9 +155,13 @@ export default function LessonEditor({
     });
   }
 
-  const serializedContent = JSON.stringify({
-    blocks: blocks.map(stripKey),
-  });
+  const hasRepetition =
+    repetitionSets.day1.length > 0 || repetitionSets.day3.length > 0;
+  const serializedContent = JSON.stringify(
+    hasRepetition
+      ? { blocks: blocks.map(stripKey), repetitionSets }
+      : { blocks: blocks.map(stripKey) },
+  );
 
   return (
     <div className="min-h-screen bg-black">
@@ -189,6 +203,33 @@ export default function LessonEditor({
               </svg>
               New lesson
             </Link>
+            <button
+              type="button"
+              onClick={() => setRepetitionOpen(true)}
+              className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium text-zinc-300 transition hover:bg-zinc-900 hover:text-zinc-100"
+              title="Edit spaced-repetition question sets"
+            >
+              <svg
+                viewBox="0 0 16 16"
+                className="h-4 w-4"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.7"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <path d="M3 5a5 5 0 0 1 9-3l1 1" />
+                <path d="M13 2v3h-3" />
+                <path d="M13 11a5 5 0 0 1-9 3l-1-1" />
+                <path d="M3 14v-3h3" />
+              </svg>
+              Repetition Set
+              {repetitionCount > 0 && (
+                <span className="ml-1 rounded-full bg-cyan-500/15 px-1.5 text-[10px] font-semibold text-cyan-300 ring-1 ring-cyan-500/30">
+                  {repetitionCount}
+                </span>
+              )}
+            </button>
             <Link
               href={`/lessons/${lessonId}`}
               target="_blank"
@@ -378,6 +419,214 @@ export default function LessonEditor({
           )}
         </section>
       </main>
+
+      {repetitionOpen && (
+        <RepetitionSetModal
+          sets={repetitionSets}
+          onChange={setRepetitionSets}
+          onClose={() => setRepetitionOpen(false)}
+        />
+      )}
+    </div>
+  );
+}
+
+function RepetitionSetModal({
+  sets,
+  onChange,
+  onClose,
+}: {
+  sets: RepetitionSets;
+  onChange: (next: RepetitionSets) => void;
+  onClose: () => void;
+}) {
+  const [activeTab, setActiveTab] = useState<"day1" | "day3">("day1");
+  const list = sets[activeTab];
+
+  function addQuestion() {
+    const next = [
+      ...list,
+      { type: "question", prompt: "", options: ["", ""], correctIndex: 0 } as QuestionBlock,
+    ];
+    onChange({ ...sets, [activeTab]: next });
+  }
+
+  function updateQuestion(i: number, patch: Partial<QuestionBlock>) {
+    const next = list.map((q, j) => (j === i ? { ...q, ...patch } : q));
+    onChange({ ...sets, [activeTab]: next });
+  }
+
+  function removeQuestion(i: number) {
+    const next = list.filter((_, j) => j !== i);
+    onChange({ ...sets, [activeTab]: next });
+  }
+
+  function moveQuestion(i: number, dir: -1 | 1) {
+    const j = i + dir;
+    if (j < 0 || j >= list.length) return;
+    const next = list.slice();
+    [next[i], next[j]] = [next[j], next[i]];
+    onChange({ ...sets, [activeTab]: next });
+  }
+
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      onClick={onClose}
+      className="fixed inset-0 z-30 flex items-start justify-center overflow-y-auto bg-black/70 px-4 py-8 backdrop-blur-sm"
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        className="w-full max-w-3xl rounded-2xl bg-zinc-950 ring-1 ring-zinc-800"
+      >
+        <div className="flex items-start justify-between border-b border-zinc-900 px-6 py-4">
+          <div>
+            <h2 className="text-base font-semibold text-zinc-100">
+              Spaced repetition
+            </h2>
+            <p className="mt-1 text-xs text-zinc-500">
+              Day +1 unlocks the day after first completion. Day +3 unlocks
+              two days after that. Mastery only hits 100% once both sets are
+              done.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close"
+            className="rounded-md p-1.5 text-zinc-500 transition hover:bg-zinc-900 hover:text-zinc-200"
+          >
+            <svg
+              viewBox="0 0 16 16"
+              className="h-4 w-4"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+            >
+              <line x1="4" y1="4" x2="12" y2="12" />
+              <line x1="12" y1="4" x2="4" y2="12" />
+            </svg>
+          </button>
+        </div>
+
+        <div className="flex gap-1 border-b border-zinc-900 px-6 pt-3">
+          {(["day1", "day3"] as const).map((tab) => {
+            const count = sets[tab].length;
+            const active = activeTab === tab;
+            return (
+              <button
+                key={tab}
+                type="button"
+                onClick={() => setActiveTab(tab)}
+                className={
+                  "rounded-t-md px-3 py-2 text-sm font-medium transition " +
+                  (active
+                    ? "bg-zinc-900 text-zinc-100"
+                    : "text-zinc-500 hover:text-zinc-300")
+                }
+              >
+                {tab === "day1" ? "Day +1" : "Day +3"}
+                {count > 0 && (
+                  <span
+                    className={
+                      "ml-2 rounded-full px-1.5 text-[10px] font-semibold ring-1 " +
+                      (active
+                        ? "bg-cyan-500/15 text-cyan-300 ring-cyan-500/30"
+                        : "bg-zinc-800 text-zinc-400 ring-zinc-700")
+                    }
+                  >
+                    {count}
+                  </span>
+                )}
+              </button>
+            );
+          })}
+        </div>
+
+        <div className="px-6 py-5">
+          {list.length === 0 ? (
+            <div className="rounded-xl border border-dashed border-zinc-800 px-6 py-10 text-center">
+              <p className="text-sm font-semibold text-zinc-200">
+                No questions yet for {activeTab === "day1" ? "Day +1" : "Day +3"}
+              </p>
+              <p className="mt-1 text-xs text-zinc-500">
+                Add multiple-choice questions students will see on this review.
+              </p>
+              <button
+                type="button"
+                onClick={addQuestion}
+                className="mt-4 rounded-lg bg-cyan-500/15 px-3 py-1.5 text-sm font-semibold text-cyan-300 ring-1 ring-cyan-500/40 transition hover:bg-cyan-500/25"
+              >
+                Add question
+              </button>
+            </div>
+          ) : (
+            <ul className="space-y-3">
+              {list.map((q, i) => (
+                <li
+                  key={i}
+                  className="rounded-xl bg-zinc-900/60 p-4 ring-1 ring-zinc-800"
+                >
+                  <div className="mb-3 flex items-center justify-between">
+                    <p className="text-xs font-semibold uppercase tracking-wider text-zinc-500">
+                      Question {i + 1}
+                    </p>
+                    <div className="flex items-center gap-1">
+                      <IconBtn
+                        label="Move up"
+                        onClick={() => moveQuestion(i, -1)}
+                        disabled={i === 0}
+                      >
+                        ↑
+                      </IconBtn>
+                      <IconBtn
+                        label="Move down"
+                        onClick={() => moveQuestion(i, 1)}
+                        disabled={i === list.length - 1}
+                      >
+                        ↓
+                      </IconBtn>
+                      <IconBtn
+                        label="Remove"
+                        onClick={() => removeQuestion(i)}
+                        danger
+                      >
+                        ✕
+                      </IconBtn>
+                    </div>
+                  </div>
+                  <QuestionEditor
+                    block={q}
+                    onUpdate={(patch) => updateQuestion(i, patch)}
+                  />
+                </li>
+              ))}
+            </ul>
+          )}
+
+          {list.length > 0 && (
+            <button
+              type="button"
+              onClick={addQuestion}
+              className="mt-4 w-full rounded-lg border border-dashed border-zinc-800 px-4 py-3 text-sm font-medium text-zinc-400 transition hover:border-zinc-700 hover:text-zinc-200"
+            >
+              + Add question
+            </button>
+          )}
+        </div>
+
+        <div className="flex justify-end gap-2 border-t border-zinc-900 px-6 py-3">
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-lg bg-cyan-500 px-4 py-1.5 text-sm font-semibold text-black transition hover:bg-cyan-400"
+          >
+            Done
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

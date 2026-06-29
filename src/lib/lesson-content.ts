@@ -136,7 +136,21 @@ export type InteractiveBlock = {
 
 export type Block = TextBlock | ImageBlock | QuestionBlock | InteractiveBlock;
 export type BlockType = Block["type"];
-export type LessonContent = { blocks: Block[] };
+
+// Spaced-repetition review sets. Authors define two extra question sets per
+// lesson; students see day1 a day after first completion and day3 two days
+// after that. Mastery wiring lives elsewhere (planned follow-up); the schema
+// is here so authors can start filling sets in now.
+export type RepetitionSets = {
+  day1: QuestionBlock[];
+  day3: QuestionBlock[];
+};
+export const EMPTY_REPETITION_SETS: RepetitionSets = { day1: [], day3: [] };
+
+export type LessonContent = {
+  blocks: Block[];
+  repetitionSets?: RepetitionSets;
+};
 
 function isValidBlock(b: unknown): b is Block {
   if (!b || typeof b !== "object") return false;
@@ -157,6 +171,14 @@ function isValidBlock(b: unknown): b is Block {
   return false;
 }
 
+function pickQuestionBlocks(raw: unknown): QuestionBlock[] {
+  if (!Array.isArray(raw)) return [];
+  return raw.filter(
+    (b): b is QuestionBlock =>
+      isValidBlock(b) && (b as Block).type === "question",
+  ) as QuestionBlock[];
+}
+
 export function parseLessonContent(raw: string): LessonContent {
   if (!raw || !raw.trim()) return { blocks: [] };
   try {
@@ -168,7 +190,17 @@ export function parseLessonContent(raw: string): LessonContent {
     ) {
       const candidates = (obj as { blocks: unknown[] }).blocks;
       const blocks = candidates.filter(isValidBlock) as Block[];
-      return { blocks };
+      const repObj = (obj as { repetitionSets?: unknown }).repetitionSets;
+      let repetitionSets: RepetitionSets | undefined;
+      if (repObj && typeof repObj === "object") {
+        const r = repObj as { day1?: unknown; day3?: unknown };
+        const day1 = pickQuestionBlocks(r.day1);
+        const day3 = pickQuestionBlocks(r.day3);
+        if (day1.length > 0 || day3.length > 0) {
+          repetitionSets = { day1, day3 };
+        }
+      }
+      return repetitionSets ? { blocks, repetitionSets } : { blocks };
     }
   } catch {
     // not JSON — legacy plain-text content
