@@ -11,6 +11,7 @@ import {
   type InteractiveBlock,
   type QuestionBlock,
   type RepetitionSets,
+  type ReviewBlock,
   type TextBlock,
   type WritingBlock,
 } from "@/lib/lesson-content";
@@ -444,25 +445,27 @@ function RepetitionSetModal({
   const [activeTab, setActiveTab] = useState<"day1" | "day3">("day1");
   const list = sets[activeTab];
 
-  function addQuestion() {
-    const next = [
-      ...list,
-      { type: "question", prompt: "", options: ["", ""], correctIndex: 0 } as QuestionBlock,
-    ];
+  function addReview(kind: "question" | "writing") {
+    const fresh: ReviewBlock =
+      kind === "writing"
+        ? { type: "writing", prompt: "", acceptedAnswers: [""] }
+        : { type: "question", prompt: "", options: ["", ""], correctIndex: 0 };
+    onChange({ ...sets, [activeTab]: [...list, fresh] });
+  }
+
+  function updateReview(i: number, patch: Partial<ReviewBlock>) {
+    const next = list.map((q, j) =>
+      j === i ? ({ ...q, ...patch } as ReviewBlock) : q,
+    );
     onChange({ ...sets, [activeTab]: next });
   }
 
-  function updateQuestion(i: number, patch: Partial<QuestionBlock>) {
-    const next = list.map((q, j) => (j === i ? { ...q, ...patch } : q));
-    onChange({ ...sets, [activeTab]: next });
-  }
-
-  function removeQuestion(i: number) {
+  function removeReview(i: number) {
     const next = list.filter((_, j) => j !== i);
     onChange({ ...sets, [activeTab]: next });
   }
 
-  function moveQuestion(i: number, dir: -1 | 1) {
+  function moveReview(i: number, dir: -1 | 1) {
     const j = i + dir;
     if (j < 0 || j >= list.length) return;
     const next = list.slice();
@@ -553,15 +556,25 @@ function RepetitionSetModal({
                 No questions yet for {activeTab === "day1" ? "Day +1" : "Day +3"}
               </p>
               <p className="mt-1 text-xs text-zinc-500">
-                Add multiple-choice questions students will see on this review.
+                Add multiple-choice or free-response questions students will
+                see on this review.
               </p>
-              <button
-                type="button"
-                onClick={addQuestion}
-                className="mt-4 rounded-lg bg-cyan-500/15 px-3 py-1.5 text-sm font-semibold text-cyan-300 ring-1 ring-cyan-500/40 transition hover:bg-cyan-500/25"
-              >
-                Add question
-              </button>
+              <div className="mt-4 flex items-center justify-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => addReview("question")}
+                  className="rounded-lg bg-emerald-500/15 px-3 py-1.5 text-sm font-semibold text-emerald-300 ring-1 ring-emerald-500/40 transition hover:bg-emerald-500/25"
+                >
+                  + Question
+                </button>
+                <button
+                  type="button"
+                  onClick={() => addReview("writing")}
+                  className="rounded-lg bg-violet-500/15 px-3 py-1.5 text-sm font-semibold text-violet-300 ring-1 ring-violet-500/40 transition hover:bg-violet-500/25"
+                >
+                  + Writing
+                </button>
+              </div>
             </div>
           ) : (
             <ul className="space-y-3">
@@ -571,50 +584,69 @@ function RepetitionSetModal({
                   className="rounded-xl bg-zinc-900/60 p-4 ring-1 ring-zinc-800"
                 >
                   <div className="mb-3 flex items-center justify-between">
-                    <p className="text-xs font-semibold uppercase tracking-wider text-zinc-500">
-                      Question {i + 1}
-                    </p>
+                    <div className="flex items-center gap-2">
+                      <TypeBadge type={q.type} />
+                      <p className="text-xs font-semibold uppercase tracking-wider text-zinc-500">
+                        {i + 1}
+                      </p>
+                    </div>
                     <div className="flex items-center gap-1">
                       <IconBtn
                         label="Move up"
-                        onClick={() => moveQuestion(i, -1)}
+                        onClick={() => moveReview(i, -1)}
                         disabled={i === 0}
                       >
                         ↑
                       </IconBtn>
                       <IconBtn
                         label="Move down"
-                        onClick={() => moveQuestion(i, 1)}
+                        onClick={() => moveReview(i, 1)}
                         disabled={i === list.length - 1}
                       >
                         ↓
                       </IconBtn>
                       <IconBtn
                         label="Remove"
-                        onClick={() => removeQuestion(i)}
+                        onClick={() => removeReview(i)}
                         danger
                       >
                         ✕
                       </IconBtn>
                     </div>
                   </div>
-                  <QuestionEditor
-                    block={q}
-                    onUpdate={(patch) => updateQuestion(i, patch)}
-                  />
+                  {q.type === "question" ? (
+                    <QuestionEditor
+                      block={q}
+                      onUpdate={(patch) => updateReview(i, patch)}
+                    />
+                  ) : (
+                    <WritingEditor
+                      block={q}
+                      onUpdate={(patch) => updateReview(i, patch)}
+                    />
+                  )}
                 </li>
               ))}
             </ul>
           )}
 
           {list.length > 0 && (
-            <button
-              type="button"
-              onClick={addQuestion}
-              className="mt-4 w-full rounded-lg border border-dashed border-zinc-800 px-4 py-3 text-sm font-medium text-zinc-400 transition hover:border-zinc-700 hover:text-zinc-200"
-            >
-              + Add question
-            </button>
+            <div className="mt-4 grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={() => addReview("question")}
+                className="rounded-lg border border-dashed border-zinc-800 px-4 py-3 text-sm font-medium text-zinc-400 transition hover:border-zinc-700 hover:text-zinc-200"
+              >
+                + Question
+              </button>
+              <button
+                type="button"
+                onClick={() => addReview("writing")}
+                className="rounded-lg border border-dashed border-zinc-800 px-4 py-3 text-sm font-medium text-zinc-400 transition hover:border-zinc-700 hover:text-zinc-200"
+              >
+                + Writing
+              </button>
+            </div>
           )}
         </div>
 

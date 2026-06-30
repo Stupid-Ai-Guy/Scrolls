@@ -51,10 +51,10 @@ export default async function LessonPage({
   let playableBlocks: Block[] = blocks;
   let stage: "initial" | "day1" | "day3" = "initial";
   if (progress.availableStage === "day1") {
-    playableBlocks = day1 as unknown as Block[];
+    playableBlocks = day1;
     stage = "day1";
   } else if (progress.availableStage === "day3") {
-    playableBlocks = day3 as unknown as Block[];
+    playableBlocks = day3;
     stage = "day3";
   }
 

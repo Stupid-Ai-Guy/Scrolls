@@ -159,11 +159,12 @@ export type BlockType = Block["type"];
 
 // Spaced-repetition review sets. Authors define two extra question sets per
 // lesson; students see day1 a day after first completion and day3 two days
-// after that. Mastery wiring lives elsewhere (planned follow-up); the schema
-// is here so authors can start filling sets in now.
+// after that. Each set holds multiple-choice (QuestionBlock) or free-response
+// (WritingBlock) questions, mixed in any order.
+export type ReviewBlock = QuestionBlock | WritingBlock;
 export type RepetitionSets = {
-  day1: QuestionBlock[];
-  day3: QuestionBlock[];
+  day1: ReviewBlock[];
+  day3: ReviewBlock[];
 };
 export const EMPTY_REPETITION_SETS: RepetitionSets = { day1: [], day3: [] };
 
@@ -198,12 +199,13 @@ function isValidBlock(b: unknown): b is Block {
   return false;
 }
 
-function pickQuestionBlocks(raw: unknown): QuestionBlock[] {
+function pickReviewBlocks(raw: unknown): ReviewBlock[] {
   if (!Array.isArray(raw)) return [];
   return raw.filter(
-    (b): b is QuestionBlock =>
-      isValidBlock(b) && (b as Block).type === "question",
-  ) as QuestionBlock[];
+    (b): b is ReviewBlock =>
+      isValidBlock(b) &&
+      ((b as Block).type === "question" || (b as Block).type === "writing"),
+  ) as ReviewBlock[];
 }
 
 export function parseLessonContent(raw: string): LessonContent {
@@ -221,8 +223,8 @@ export function parseLessonContent(raw: string): LessonContent {
       let repetitionSets: RepetitionSets | undefined;
       if (repObj && typeof repObj === "object") {
         const r = repObj as { day1?: unknown; day3?: unknown };
-        const day1 = pickQuestionBlocks(r.day1);
-        const day3 = pickQuestionBlocks(r.day3);
+        const day1 = pickReviewBlocks(r.day1);
+        const day3 = pickReviewBlocks(r.day3);
         if (day1.length > 0 || day3.length > 0) {
           repetitionSets = { day1, day3 };
         }
