@@ -20,16 +20,19 @@ export type QuestionBlock = {
 };
 
 // Free-response question. The author lists one or more accepted answers;
-// the student types and must match one. `alwaysLatex` makes the input
-// render as a live KaTeX preview while they type — the stored value is
-// still the raw LaTeX source. `caseSensitive` defaults to false so authors
-// don't have to enumerate capitalization variants.
+// the student types and must match one. `alwaysLatex` swaps the input for
+// a rendered preview the student builds via keystrokes plus admin-defined
+// `buttons` (each is a LaTeX snippet inserted at the cursor; empty `{}`,
+// `()` or `[]` pairs in the snippet act as the slot the cursor lands in).
+// `caseSensitive` defaults to false; when alwaysLatex is on it's forced
+// true because LaTeX commands like \sin / \Sin differ.
 export type WritingBlock = {
   type: "writing";
   prompt: string;
   acceptedAnswers: string[];
   caseSensitive?: boolean;
   alwaysLatex?: boolean;
+  buttons?: { label: string; latex: string }[];
   explanation?: string;
   imageUrl?: string;
 };
@@ -187,11 +190,19 @@ function isValidBlock(b: unknown): b is Block {
     );
   }
   if (obj.type === "writing") {
-    return (
-      typeof obj.prompt === "string" &&
-      Array.isArray(obj.acceptedAnswers) &&
-      obj.acceptedAnswers.every((a) => typeof a === "string")
-    );
+    if (typeof obj.prompt !== "string") return false;
+    if (!Array.isArray(obj.acceptedAnswers)) return false;
+    if (!obj.acceptedAnswers.every((a) => typeof a === "string")) return false;
+    if (obj.buttons !== undefined) {
+      if (!Array.isArray(obj.buttons)) return false;
+      for (const b of obj.buttons) {
+        if (!b || typeof b !== "object") return false;
+        const bb = b as Record<string, unknown>;
+        if (typeof bb.label !== "string" || typeof bb.latex !== "string")
+          return false;
+      }
+    }
+    return true;
   }
   if (obj.type === "interactive") {
     return typeof obj.code === "string";

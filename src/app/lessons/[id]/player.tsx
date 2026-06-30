@@ -512,10 +512,12 @@ function normalizeWritingAnswer(raw: string, caseSensitive: boolean): string {
 }
 
 function matchesAcceptedAnswer(value: string, block: WritingBlock): boolean {
-  const norm = normalizeWritingAnswer(value, !!block.caseSensitive);
+  // LaTeX answers are always case-sensitive because \sin and \Sin differ.
+  const cs = !!block.caseSensitive || !!block.alwaysLatex;
+  const norm = normalizeWritingAnswer(value, cs);
   if (!norm) return false;
   return block.acceptedAnswers.some(
-    (a) => normalizeWritingAnswer(a, !!block.caseSensitive) === norm,
+    (a) => normalizeWritingAnswer(a, cs) === norm,
   );
 }
 
@@ -673,6 +675,245 @@ function QuestionView({
   );
 }
 
+// Walks backward from `cursor` and returns the last "atom" — a balanced
+// (..) group, a balanced {..} group (unwrapped), or a run of word
+// characters. Used by `/` to wrap the prior value in a fraction.
+function findLastAtom(
+  source: string,
+  cursor: number,
+): { text: string; start: number } | null {
+  if (cursor <= 0) return null;
+  const ch = source[cursor - 1];
+  if (ch === ")") {
+    let depth = 0;
+    for (let i = cursor - 1; i >= 0; i--) {
+      if (source[i] === ")") depth++;
+      else if (source[i] === "(") {
+        depth--;
+        if (depth === 0) return { text: source.slice(i, cursor), start: i };
+      }
+    }
+    return null;
+  }
+  if (ch === "}") {
+    let depth = 0;
+    for (let i = cursor - 1; i >= 0; i--) {
+      if (source[i] === "}") depth++;
+      else if (source[i] === "{") {
+        depth--;
+        if (depth === 0) {
+          // Unwrap: return only what's inside the braces.
+          return { text: source.slice(i + 1, cursor - 1), start: i };
+        }
+      }
+    }
+    return null;
+  }
+  if (/[a-zA-Z0-9.]/.test(ch)) {
+    let i = cursor - 1;
+    while (i >= 0 && /[a-zA-Z0-9.]/.test(source[i])) i--;
+    return { text: source.slice(i + 1, cursor), start: i + 1 };
+  }
+  return null;
+}
+
+function LatexInputArea({
+  block,
+  value,
+  onChange,
+  disabled,
+  ringClass,
+}: {
+  block: WritingBlock;
+  value: string;
+  onChange: (v: string) => void;
+  disabled: boolean;
+  ringClass: string;
+}) {
+  // Source is the raw LaTeX the student is building. `cursor` is the index
+  // into source where the next keystroke or button-press lands.
+  const [source, setSource] = useState(value);
+  const [cursor, setCursor] = useState(value.length);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  // Sync external value (parent restart, etc.) back into local state.
+  useEffect(() => {
+    setSource(value);
+    setCursor(value.length);
+  }, [value]);
+
+  const apply = (nextSource: string, nextCursor: number) => {
+    setSource(nextSource);
+    setCursor(nextCursor);
+    onChange(nextSource);
+  };
+
+  const insertText = (t: string) => {
+    if (disabled) return;
+    apply(source.slice(0, cursor) + t + source.slice(cursor), cursor + t.length);
+  };
+
+  // Button snippets can mark the cursor slot with an empty `{}`, `()`, or
+  // `[]`. After insert, cursor goes BETWEEN the two characters of the slot.
+  const insertSnippet = (snippet: string) => {
+    if (disabled || !snippet) return;
+    const slot = snippet.match(/\{\}|\(\)|\[\]/);
+    const ns = source.slice(0, cursor) + snippet + source.slice(cursor);
+    if (slot && slot.index !== undefined) {
+      apply(ns, cursor + slot.index + 1);
+    } else {
+      apply(ns, cursor + snippet.length);
+    }
+  };
+
+  const backspace = () => {
+    if (disabled || cursor === 0) return;
+    apply(source.slice(0, cursor - 1) + source.slice(cursor), cursor - 1);
+  };
+
+  // `/` wraps the last atom in `\frac{atom}{}` and parks the cursor inside
+  // the empty denominator. If there's nothing to wrap, falls back to a
+  // literal `/` so e.g. an existing fraction's display isn't blocked.
+  const slash = () => {
+    if (disabled) return;
+    const atom = findLastAtom(source, cursor);
+    if (atom === null) {
+      insertText("/");
+      return;
+    }
+    const before = source.slice(0, atom.start);
+    const after = source.slice(cursor);
+    const inserted = `\\frac{${atom.text}}{}`;
+    apply(before + inserted + after, before.length + inserted.length - 1);
+  };
+
+  const onKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (disabled) return;
+    if (e.key === "Backspace") {
+      e.preventDefault();
+      backspace();
+    } else if (e.key === "/") {
+      e.preventDefault();
+      slash();
+    } else if (e.key === "ArrowLeft") {
+      e.preventDefault();
+      setCursor((c) => Math.max(0, c - 1));
+    } else if (e.key === "ArrowRight") {
+      e.preventDefault();
+      setCursor((c) => Math.min(source.length, c + 1));
+    } else if (e.key === "Home") {
+      e.preventDefault();
+      setCursor(0);
+    } else if (e.key === "End") {
+      e.preventDefault();
+      setCursor(source.length);
+    } else if (e.key.length === 1 && !e.metaKey && !e.ctrlKey && !e.altKey) {
+      e.preventDefault();
+      insertText(e.key);
+    }
+  };
+
+  // Render the preview. Replace empty `{}` / `[]` with `{\square}` so empty
+  // slots stay visible — KaTeX would otherwise collapse them to nothing,
+  // which is disorienting after pressing `/` lands the cursor in an empty
+  // denominator. Also render a small caret-equivalent at the cursor position
+  // by splitting the source: prefix `\,|\,` suffix would break LaTeX
+  // mid-expression though, so we don't try to draw an in-equation cursor —
+  // arrow keys still work, just without a visual carat in the rendered math.
+  const previewSource = useMemo(() => {
+    const visibleSource = source
+      .replace(/\{\}/g, "{\\square}")
+      .replace(/\[\]/g, "[\\square]");
+    return visibleSource || "\\,";
+  }, [source]);
+
+  const previewHtml = useMemo(() => {
+    try {
+      return katex.renderToString(previewSource, {
+        throwOnError: false,
+        displayMode: false,
+        output: "html",
+      });
+    } catch {
+      return "";
+    }
+  }, [previewSource]);
+
+  const buttons = block.buttons ?? [];
+
+  return (
+    <div className="space-y-3">
+      <div
+        onClick={() => inputRef.current?.focus()}
+        className={
+          "flex min-h-[5.5rem] cursor-text items-center justify-center rounded-xl bg-zinc-900/60 px-4 py-5 ring-1 transition " +
+          ringClass
+        }
+      >
+        <div
+          className="text-2xl leading-tight text-zinc-100"
+          dangerouslySetInnerHTML={{ __html: previewHtml }}
+        />
+      </div>
+      {/* Hidden but real input: receives keyboard focus, captures keys via
+          onKeyDown. Stays empty (we manage value ourselves) and is positioned
+          off-screen so it doesn't take layout space. */}
+      <input
+        ref={inputRef}
+        type="text"
+        value=""
+        readOnly
+        autoFocus={!disabled}
+        onKeyDown={onKeyDown}
+        onChange={() => {}}
+        aria-label="LaTeX answer input"
+        className="sr-only"
+        suppressHydrationWarning
+      />
+      <div className="flex flex-wrap items-center gap-1.5">
+        {buttons.map((b, i) => (
+          <button
+            key={i}
+            type="button"
+            disabled={disabled}
+            onClick={() => {
+              insertSnippet(b.latex);
+              inputRef.current?.focus();
+            }}
+            className="rounded-md bg-zinc-800 px-2.5 py-1 text-sm font-medium text-zinc-100 ring-1 ring-zinc-700 transition hover:bg-zinc-700 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {b.label || "·"}
+          </button>
+        ))}
+        <button
+          type="button"
+          disabled={disabled}
+          onClick={() => {
+            slash();
+            inputRef.current?.focus();
+          }}
+          title="Turn the last value into a fraction"
+          className="rounded-md bg-zinc-800 px-2.5 py-1 text-sm font-medium text-zinc-100 ring-1 ring-zinc-700 hover:bg-zinc-700 disabled:opacity-50"
+        >
+          a⁄b
+        </button>
+        <button
+          type="button"
+          disabled={disabled}
+          onClick={() => {
+            backspace();
+            inputRef.current?.focus();
+          }}
+          title="Backspace"
+          className="rounded-md bg-zinc-800 px-2.5 py-1 text-sm font-medium text-zinc-100 ring-1 ring-zinc-700 hover:bg-zinc-700 disabled:opacity-50"
+        >
+          ⌫
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function WritingView({
   block,
   ws,
@@ -685,22 +926,11 @@ function WritingView({
   const submitted = ws?.submitted ?? false;
   const correct = submitted && (ws?.correct ?? false);
   const value = ws?.value ?? "";
-
-  // Live KaTeX preview, memoized so we don't re-render the same input twice.
-  // throwOnError:false makes incomplete LaTeX render as the partial error
-  // instead of crashing.
-  const previewHtml = useMemo(() => {
-    if (!block.alwaysLatex) return "";
-    try {
-      return katex.renderToString(value || "\\,", {
-        throwOnError: false,
-        displayMode: false,
-        output: "html",
-      });
-    } catch {
-      return "";
-    }
-  }, [value, block.alwaysLatex]);
+  const ringClass = submitted
+    ? correct
+      ? "ring-emerald-400"
+      : "ring-rose-400"
+    : "ring-zinc-800 focus-within:ring-2 focus-within:ring-cyan-400";
 
   return (
     <div>
@@ -727,35 +957,32 @@ function WritingView({
       )}
 
       <div className="mt-6">
-        <input
-          type="text"
-          value={value}
-          onChange={(e) => onChange(e.target.value)}
-          disabled={submitted}
-          placeholder={block.alwaysLatex ? "\\frac{1}{2}" : "Type your answer"}
-          spellCheck={!block.alwaysLatex}
-          autoComplete="off"
-          suppressHydrationWarning
-          className={
-            "w-full rounded-xl bg-zinc-900 px-4 py-3 text-base ring-1 transition placeholder:text-zinc-600 focus:outline-none disabled:opacity-70 " +
-            (block.alwaysLatex
-              ? "font-mono text-zinc-200 "
-              : "text-zinc-100 ") +
-            (submitted
-              ? correct
-                ? "ring-emerald-400"
-                : "ring-rose-400"
-              : "ring-zinc-800 focus:ring-2 focus:ring-cyan-400")
-          }
-        />
-
-        {block.alwaysLatex && (
-          <div className="mt-3 flex min-h-[3.25rem] items-center justify-center rounded-xl bg-zinc-900/60 px-4 py-3 ring-1 ring-zinc-800">
-            <div
-              className="text-xl text-zinc-100"
-              dangerouslySetInnerHTML={{ __html: previewHtml }}
-            />
-          </div>
+        {block.alwaysLatex ? (
+          <LatexInputArea
+            block={block}
+            value={value}
+            onChange={onChange}
+            disabled={submitted}
+            ringClass={ringClass}
+          />
+        ) : (
+          <input
+            type="text"
+            value={value}
+            onChange={(e) => onChange(e.target.value)}
+            disabled={submitted}
+            placeholder="Type your answer"
+            autoComplete="off"
+            suppressHydrationWarning
+            className={
+              "w-full rounded-xl bg-zinc-900 px-4 py-3 text-base text-zinc-100 ring-1 transition placeholder:text-zinc-600 focus:outline-none disabled:opacity-70 " +
+              (submitted
+                ? correct
+                  ? "ring-emerald-400"
+                  : "ring-rose-400"
+                : "ring-zinc-800 focus:ring-2 focus:ring-cyan-400")
+            }
+          />
         )}
       </div>
 

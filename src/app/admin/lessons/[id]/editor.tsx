@@ -1135,25 +1135,41 @@ function WritingEditor({
           <span>
             <span className="font-medium">Always LaTeX</span>
             <span className="ml-1 text-zinc-500">
-              — student input renders as math while they type
+              — student sees only a rendered preview and builds their answer
+              with buttons + keys
             </span>
           </span>
         </label>
-        <label className="inline-flex items-center gap-2 text-xs text-zinc-300">
+        <label
+          className={
+            "inline-flex items-center gap-2 text-xs " +
+            (block.alwaysLatex ? "text-zinc-500" : "text-zinc-300")
+          }
+        >
           <input
             type="checkbox"
-            checked={!!block.caseSensitive}
+            checked={!!block.caseSensitive || !!block.alwaysLatex}
             onChange={(e) => onUpdate({ caseSensitive: e.target.checked })}
-            className="h-4 w-4 rounded border-zinc-700 bg-zinc-900 text-cyan-500 focus:ring-cyan-400"
+            disabled={!!block.alwaysLatex}
+            className="h-4 w-4 rounded border-zinc-700 bg-zinc-900 text-cyan-500 focus:ring-cyan-400 disabled:opacity-60"
           />
           <span>
             <span className="font-medium">Case-sensitive</span>
             <span className="ml-1 text-zinc-500">
-              — off by default; helpful for prose answers
+              {block.alwaysLatex
+                ? "— forced on for LaTeX answers (\\sin ≠ \\Sin)"
+                : "— off by default; helpful for prose answers"}
             </span>
           </span>
         </label>
       </div>
+
+      {block.alwaysLatex && (
+        <WritingButtonsEditor
+          buttons={block.buttons ?? []}
+          onChange={(buttons) => onUpdate({ buttons })}
+        />
+      )}
 
       <div>
         <p className="mb-2 text-xs font-medium uppercase tracking-wider text-zinc-500">
@@ -1168,6 +1184,84 @@ function WritingEditor({
           className={fieldClass}
         />
       </div>
+    </div>
+  );
+}
+
+function WritingButtonsEditor({
+  buttons,
+  onChange,
+}: {
+  buttons: { label: string; latex: string }[];
+  onChange: (next: { label: string; latex: string }[]) => void;
+}) {
+  function updateRow(i: number, patch: Partial<{ label: string; latex: string }>) {
+    onChange(buttons.map((b, j) => (j === i ? { ...b, ...patch } : b)));
+  }
+  function addRow() {
+    onChange([...buttons, { label: "", latex: "" }]);
+  }
+  function removeRow(i: number) {
+    onChange(buttons.filter((_, j) => j !== i));
+  }
+
+  return (
+    <div className="rounded-xl border border-zinc-800 bg-zinc-950/40 p-4">
+      <p className="text-xs font-medium uppercase tracking-wider text-zinc-500">
+        Quick-insert buttons
+      </p>
+      <p className="mt-1 text-[11px] text-zinc-500">
+        Each button drops a LaTeX snippet into the student&apos;s answer at
+        the cursor. Put empty <code className="text-zinc-300">{`{}`}</code>,{" "}
+        <code className="text-zinc-300">()</code>, or{" "}
+        <code className="text-zinc-300">[]</code> in the snippet to mark where
+        the cursor should land — e.g.{" "}
+        <code className="text-zinc-300">\sin()</code> drops the cursor inside
+        the parens. The student can also press <kbd>/</kbd> to turn the last
+        value into a fraction.
+      </p>
+      {buttons.length === 0 ? (
+        <p className="mt-3 text-xs italic text-zinc-600">
+          No buttons yet. Add one to give students a quick way to type
+          functions, Greek letters, or any LaTeX snippet.
+        </p>
+      ) : (
+        <ul className="mt-3 space-y-2">
+          {buttons.map((b, i) => (
+            <li key={i} className="flex items-center gap-2">
+              <input
+                value={b.label}
+                onChange={(e) => updateRow(i, { label: e.target.value })}
+                placeholder="Label (sine)"
+                suppressHydrationWarning
+                className={`${fieldClass} max-w-[10rem]`}
+              />
+              <input
+                value={b.latex}
+                onChange={(e) => updateRow(i, { latex: e.target.value })}
+                placeholder="LaTeX (\\sin())"
+                spellCheck={false}
+                suppressHydrationWarning
+                className={`${fieldClass} font-mono`}
+              />
+              <IconBtn
+                label="Remove"
+                onClick={() => removeRow(i)}
+                danger
+              >
+                ×
+              </IconBtn>
+            </li>
+          ))}
+        </ul>
+      )}
+      <button
+        type="button"
+        onClick={addRow}
+        className="mt-3 rounded-lg bg-zinc-900 px-3 py-1.5 text-xs font-medium text-zinc-300 ring-1 ring-zinc-800 hover:bg-zinc-800"
+      >
+        + Add button
+      </button>
     </div>
   );
 }
