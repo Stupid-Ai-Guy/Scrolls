@@ -8,7 +8,9 @@ import type {
   InteractiveBlock,
   QuestionBlock,
   TextBlock,
+  WritingBlock,
 } from "@/lib/lesson-content";
+import katex from "katex";
 import { recordLessonCompletionAction } from "@/lib/actions";
 import ScrollScriptRunner from "@/components/scrollscript-runner";
 import { SceneRunner } from "@/components/scene-editor";
@@ -22,6 +24,7 @@ import {
 
 type QuestionState = { selected: number | null; submitted: boolean };
 type InteractiveState = { checked: boolean; correct: boolean };
+type WritingState = { value: string; submitted: boolean; correct: boolean };
 
 export default function LessonPlayer({
   lessonId,
@@ -49,11 +52,18 @@ export default function LessonPlayer({
   const [interactiveState, setInteractiveState] = useState<
     Record<number, InteractiveState>
   >({});
+  const [writingState, setWritingState] = useState<
+    Record<number, WritingState>
+  >({});
 
   const totalQuestions = useMemo(
     () =>
-      blocks.filter((b) => b.type === "question" || b.type === "interactive")
-        .length,
+      blocks.filter(
+        (b) =>
+          b.type === "question" ||
+          b.type === "writing" ||
+          b.type === "interactive",
+      ).length,
     [blocks],
   );
   const correctSoFar = useMemo(() => {
@@ -74,8 +84,13 @@ export default function LessonPlayer({
       const b = blocks[i];
       if (b && b.type === "interactive" && v.checked && v.correct) n++;
     }
+    for (const [k, v] of Object.entries(writingState)) {
+      const i = Number(k);
+      const b = blocks[i];
+      if (b && b.type === "writing" && v.submitted && v.correct) n++;
+    }
     return n;
-  }, [questionState, interactiveState, blocks]);
+  }, [questionState, interactiveState, writingState, blocks]);
 
   const backHref = `/dashboard?subject=${normalizeSubject(subject)}&grade=${gradeParam(grade)}`;
   const total = blocks.length;
@@ -162,6 +177,7 @@ export default function LessonPlayer({
               setIndex(0);
               setQuestionState({});
               setInteractiveState({});
+              setWritingState({});
             }}
           />
         ) : (
@@ -169,6 +185,7 @@ export default function LessonPlayer({
             block={blocks[index]}
             qs={questionState[index]}
             is={interactiveState[index]}
+            ws={writingState[index]}
             onAnswer={(selected) =>
               setQuestionState((s) => ({
                 ...s,
@@ -188,6 +205,26 @@ export default function LessonPlayer({
               setInteractiveState((s) => ({
                 ...s,
                 [index]: { checked: true, correct },
+              }))
+            }
+            onWritingChange={(value) =>
+              setWritingState((s) => ({
+                ...s,
+                [index]: {
+                  value,
+                  submitted: false,
+                  correct: s[index]?.correct ?? false,
+                },
+              }))
+            }
+            onWritingSubmit={(correct) =>
+              setWritingState((s) => ({
+                ...s,
+                [index]: {
+                  value: s[index]?.value ?? "",
+                  submitted: true,
+                  correct,
+                },
               }))
             }
             onContinue={() => setIndex((i) => i + 1)}
@@ -337,27 +374,47 @@ function BlockView({
   block,
   qs,
   is,
+  ws,
   onAnswer,
   onSubmit,
   onInteractiveResult,
+  onWritingChange,
+  onWritingSubmit,
   onContinue,
   onPrev,
 }: {
   block: Block;
   qs: QuestionState | undefined;
   is: InteractiveState | undefined;
+  ws: WritingState | undefined;
   onAnswer: (i: number) => void;
   onSubmit: () => void;
   onInteractiveResult: (correct: boolean) => void;
+  onWritingChange: (value: string) => void;
+  onWritingSubmit: (correct: boolean) => void;
   onContinue: () => void;
   onPrev?: () => void;
 }) {
+  function checkWriting() {
+    if (block.type !== "writing") return;
+    const value = ws?.value ?? "";
+    const correct = matchesAcceptedAnswer(value, block);
+    onWritingSubmit(correct);
+  }
+
   return (
     <div className="rounded-2xl bg-zinc-950 p-8 ring-1 ring-zinc-800">
       {block.type === "text" && <TextView block={block} />}
       {block.type === "image" && <ImageView block={block} />}
       {block.type === "question" && (
         <QuestionView block={block} qs={qs} onAnswer={onAnswer} />
+      )}
+      {block.type === "writing" && (
+        <WritingView
+          block={block}
+          ws={ws}
+          onChange={onWritingChange}
+        />
       )}
       {block.type === "interactive" && (
         <InteractiveView block={block} onResult={onInteractiveResult} />
@@ -395,6 +452,25 @@ function BlockView({
               Check answer
             </button>
           )
+        ) : block.type === "writing" ? (
+          ws?.submitted ? (
+            <button
+              type="button"
+              onClick={onContinue}
+              className="rounded-lg bg-cyan-500 px-5 py-2 text-sm font-semibold text-black hover:bg-cyan-400"
+            >
+              Continue
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={checkWriting}
+              disabled={!ws?.value?.trim()}
+              className="rounded-lg bg-cyan-500 px-5 py-2 text-sm font-semibold text-black hover:bg-cyan-400 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              Check answer
+            </button>
+          )
         ) : block.type === "interactive" ? (
           <button
             type="button"
@@ -414,6 +490,22 @@ function BlockView({
         )}
       </div>
     </div>
+  );
+}
+
+function normalizeWritingAnswer(raw: string, caseSensitive: boolean): string {
+  // Collapse internal whitespace so "2 x + 3" matches "2x+3" (LaTeX / math
+  // expressions rarely care about spacing). Leading/trailing trimmed too.
+  let s = raw.trim().replace(/\s+/g, "");
+  if (!caseSensitive) s = s.toLowerCase();
+  return s;
+}
+
+function matchesAcceptedAnswer(value: string, block: WritingBlock): boolean {
+  const norm = normalizeWritingAnswer(value, !!block.caseSensitive);
+  if (!norm) return false;
+  return block.acceptedAnswers.some(
+    (a) => normalizeWritingAnswer(a, !!block.caseSensitive) === norm,
   );
 }
 
@@ -563,6 +655,127 @@ function QuestionView({
             <p className="mt-1 text-zinc-300">
               The correct answer is{" "}
               {String.fromCharCode(65 + block.correctIndex)}.
+            </p>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function WritingView({
+  block,
+  ws,
+  onChange,
+}: {
+  block: WritingBlock;
+  ws: WritingState | undefined;
+  onChange: (value: string) => void;
+}) {
+  const submitted = ws?.submitted ?? false;
+  const correct = submitted && (ws?.correct ?? false);
+  const value = ws?.value ?? "";
+
+  // Live KaTeX preview, memoized so we don't re-render the same input twice.
+  // throwOnError:false makes incomplete LaTeX render as the partial error
+  // instead of crashing.
+  const previewHtml = useMemo(() => {
+    if (!block.alwaysLatex) return "";
+    try {
+      return katex.renderToString(value || "\\,", {
+        throwOnError: false,
+        displayMode: false,
+        output: "html",
+      });
+    } catch {
+      return "";
+    }
+  }, [value, block.alwaysLatex]);
+
+  return (
+    <div>
+      <p className="text-xs font-semibold uppercase tracking-[0.2em] text-violet-300">
+        Writing
+      </p>
+      <h2 className="mt-2 text-xl font-semibold tracking-tight text-zinc-100">
+        {block.prompt ? (
+          <RichText source={block.prompt} />
+        ) : (
+          "Untitled question"
+        )}
+      </h2>
+
+      {block.imageUrl && (
+        <div className="mt-5 overflow-hidden rounded-xl bg-zinc-900 ring-1 ring-zinc-800">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={block.imageUrl}
+            alt=""
+            className="mx-auto block max-h-[20rem] w-full object-contain"
+          />
+        </div>
+      )}
+
+      <div className="mt-6">
+        <input
+          type="text"
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          disabled={submitted}
+          placeholder={block.alwaysLatex ? "\\frac{1}{2}" : "Type your answer"}
+          spellCheck={!block.alwaysLatex}
+          autoComplete="off"
+          suppressHydrationWarning
+          className={
+            "w-full rounded-xl bg-zinc-900 px-4 py-3 text-base ring-1 transition placeholder:text-zinc-600 focus:outline-none disabled:opacity-70 " +
+            (block.alwaysLatex
+              ? "font-mono text-zinc-200 "
+              : "text-zinc-100 ") +
+            (submitted
+              ? correct
+                ? "ring-emerald-400"
+                : "ring-rose-400"
+              : "ring-zinc-800 focus:ring-2 focus:ring-cyan-400")
+          }
+        />
+
+        {block.alwaysLatex && (
+          <div className="mt-3 flex min-h-[3.25rem] items-center justify-center rounded-xl bg-zinc-900/60 px-4 py-3 ring-1 ring-zinc-800">
+            <div
+              className="text-xl text-zinc-100"
+              dangerouslySetInnerHTML={{ __html: previewHtml }}
+            />
+          </div>
+        )}
+      </div>
+
+      {submitted && (
+        <div
+          className={
+            "mt-5 rounded-xl p-4 text-sm ring-1 " +
+            (correct
+              ? "bg-emerald-500/10 text-emerald-200 ring-emerald-500/30"
+              : "bg-rose-500/10 text-rose-200 ring-rose-500/30")
+          }
+        >
+          <p className="font-semibold">{correct ? "Correct" : "Not quite"}</p>
+          {!correct && (
+            <p className="mt-1 text-zinc-300">
+              Accepted answer:{" "}
+              <span className="font-mono text-zinc-100">
+                {block.acceptedAnswers[0] || "(unset)"}
+              </span>
+              {block.acceptedAnswers.length > 1 && (
+                <span className="text-zinc-500">
+                  {" "}
+                  · {block.acceptedAnswers.length - 1} other accepted
+                </span>
+              )}
+            </p>
+          )}
+          {block.explanation && (
+            <p className="mt-1 text-zinc-300">
+              <RichText source={block.explanation} />
             </p>
           )}
         </div>

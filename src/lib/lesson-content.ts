@@ -19,6 +19,21 @@ export type QuestionBlock = {
   imageUrl?: string;
 };
 
+// Free-response question. The author lists one or more accepted answers;
+// the student types and must match one. `alwaysLatex` makes the input
+// render as a live KaTeX preview while they type — the stored value is
+// still the raw LaTeX source. `caseSensitive` defaults to false so authors
+// don't have to enumerate capitalization variants.
+export type WritingBlock = {
+  type: "writing";
+  prompt: string;
+  acceptedAnswers: string[];
+  caseSensitive?: boolean;
+  alwaysLatex?: boolean;
+  explanation?: string;
+  imageUrl?: string;
+};
+
 export type SceneShape =
   | {
       id: string;
@@ -134,7 +149,12 @@ export type InteractiveBlock = {
   imageUrl?: string;
 };
 
-export type Block = TextBlock | ImageBlock | QuestionBlock | InteractiveBlock;
+export type Block =
+  | TextBlock
+  | ImageBlock
+  | QuestionBlock
+  | WritingBlock
+  | InteractiveBlock;
 export type BlockType = Block["type"];
 
 // Spaced-repetition review sets. Authors define two extra question sets per
@@ -163,6 +183,13 @@ function isValidBlock(b: unknown): b is Block {
       Array.isArray(obj.options) &&
       obj.options.every((o) => typeof o === "string") &&
       typeof obj.correctIndex === "number"
+    );
+  }
+  if (obj.type === "writing") {
+    return (
+      typeof obj.prompt === "string" &&
+      Array.isArray(obj.acceptedAnswers) &&
+      obj.acceptedAnswers.every((a) => typeof a === "string")
     );
   }
   if (obj.type === "interactive") {
@@ -217,6 +244,12 @@ export function emptyBlock(type: BlockType): Block {
       prompt: "",
       code: "",
     };
+  if (type === "writing")
+    return {
+      type: "writing",
+      prompt: "",
+      acceptedAnswers: [""],
+    };
   return { type: "question", prompt: "", options: ["", ""], correctIndex: 0 };
 }
 
@@ -228,7 +261,7 @@ export function countBlocks(content: LessonContent) {
   for (const b of content.blocks) {
     if (b.type === "text") text++;
     else if (b.type === "image") image++;
-    else if (b.type === "question") question++;
+    else if (b.type === "question" || b.type === "writing") question++;
     else if (b.type === "interactive") interactive++;
   }
   return {

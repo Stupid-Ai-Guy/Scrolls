@@ -12,6 +12,7 @@ import {
   type QuestionBlock,
   type RepetitionSets,
   type TextBlock,
+  type WritingBlock,
 } from "@/lib/lesson-content";
 import {
   DEFAULT_SCENE,
@@ -665,6 +666,13 @@ function AddBlockBar({
       </button>
       <button
         type="button"
+        onClick={() => onAdd("writing")}
+        className="rounded-lg bg-zinc-950 px-3.5 py-2 text-sm font-medium text-zinc-300 ring-1 ring-zinc-800 hover:bg-zinc-900"
+      >
+        + Writing
+      </button>
+      <button
+        type="button"
         onClick={() => onAdd("interactive")}
         className="rounded-lg bg-cyan-500 px-3.5 py-2 text-sm font-semibold text-black hover:bg-cyan-400"
       >
@@ -679,12 +687,14 @@ function TypeBadge({ type }: { type: BlockType }) {
     text: "bg-zinc-800 text-zinc-300",
     image: "bg-amber-500/10 text-amber-300 ring-1 ring-amber-500/30",
     question: "bg-emerald-500/10 text-emerald-300 ring-1 ring-emerald-500/30",
+    writing: "bg-violet-500/10 text-violet-300 ring-1 ring-violet-500/30",
     interactive: "bg-cyan-500/10 text-cyan-300 ring-1 ring-cyan-500/30",
   };
   const labels: Record<BlockType, string> = {
     text: "Explanation",
     image: "Diagram",
     question: "Question",
+    writing: "Writing",
     interactive: "Interactive",
   };
   return (
@@ -748,6 +758,9 @@ function BlockCard({
         )}
         {block.type === "question" && (
           <QuestionEditor block={block} onUpdate={onUpdate} />
+        )}
+        {block.type === "writing" && (
+          <WritingEditor block={block} onUpdate={onUpdate} />
         )}
         {block.type === "interactive" && (
           <InteractiveEditor block={block} onUpdate={onUpdate} />
@@ -982,6 +995,146 @@ function QuestionEditor({
         suppressHydrationWarning
         className={fieldClass}
       />
+    </div>
+  );
+}
+
+function WritingEditor({
+  block,
+  onUpdate,
+}: {
+  block: WritingBlock;
+  onUpdate: (patch: Partial<WritingBlock>) => void;
+}) {
+  function updateAnswer(i: number, value: string) {
+    const next = block.acceptedAnswers.slice();
+    next[i] = value;
+    onUpdate({ acceptedAnswers: next });
+  }
+  function addAnswer() {
+    onUpdate({ acceptedAnswers: [...block.acceptedAnswers, ""] });
+  }
+  function removeAnswer(i: number) {
+    if (block.acceptedAnswers.length <= 1) return;
+    onUpdate({
+      acceptedAnswers: block.acceptedAnswers.filter((_, j) => j !== i),
+    });
+  }
+
+  return (
+    <div className="space-y-3">
+      <textarea
+        value={block.prompt}
+        onChange={(e) => onUpdate({ prompt: e.target.value })}
+        rows={2}
+        placeholder="Ask the student to write the answer, e.g. Solve for x: 2x + 3 = 7"
+        suppressHydrationWarning
+        className={fieldClass}
+      />
+      <p className="-mt-2 text-[11px] text-zinc-500">
+        Math: wrap LaTeX in <code className="text-zinc-300">$…$</code> for
+        inline (e.g. <code className="text-zinc-300">$\sin(x)$</code>) or{" "}
+        <code className="text-zinc-300">$$…$$</code> for display. Works in
+        the prompt and explanation.
+      </p>
+
+      <div>
+        <p className="mb-2 text-xs font-medium uppercase tracking-wider text-zinc-500">
+          Diagram (optional)
+        </p>
+        <input
+          value={block.imageUrl ?? ""}
+          onChange={(e) => onUpdate({ imageUrl: e.target.value })}
+          placeholder="Image URL — shown above the question"
+          suppressHydrationWarning
+          className={fieldClass}
+        />
+      </div>
+
+      <div>
+        <p className="mb-2 text-xs font-medium uppercase tracking-wider text-zinc-500">
+          Accepted answers
+        </p>
+        <p className="mb-2 text-[11px] text-zinc-500">
+          Add every variant you want to mark correct. If <em>Always LaTeX</em>{" "}
+          is on, write each answer as a LaTeX expression (e.g.{" "}
+          <code className="text-zinc-300">\frac{"{"}1{"}{"}2{"}"}</code>).
+        </p>
+        <ul className="space-y-2">
+          {block.acceptedAnswers.map((ans, i) => (
+            <li key={i} className="flex items-center gap-2">
+              <input
+                value={ans}
+                onChange={(e) => updateAnswer(i, e.target.value)}
+                placeholder={i === 0 ? "Primary answer" : "Alternative answer"}
+                spellCheck={false}
+                suppressHydrationWarning
+                className={`${fieldClass} font-mono`}
+              />
+              <IconBtn
+                label="Remove"
+                onClick={() => removeAnswer(i)}
+                disabled={block.acceptedAnswers.length <= 1}
+                danger
+              >
+                ×
+              </IconBtn>
+            </li>
+          ))}
+        </ul>
+        <button
+          type="button"
+          onClick={addAnswer}
+          className="mt-2 rounded-lg bg-zinc-900 px-3 py-1.5 text-xs font-medium text-zinc-300 ring-1 ring-zinc-800 hover:bg-zinc-800"
+        >
+          + Add alternative
+        </button>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-4 pt-1">
+        <label className="inline-flex items-center gap-2 text-xs text-zinc-300">
+          <input
+            type="checkbox"
+            checked={!!block.alwaysLatex}
+            onChange={(e) => onUpdate({ alwaysLatex: e.target.checked })}
+            className="h-4 w-4 rounded border-zinc-700 bg-zinc-900 text-cyan-500 focus:ring-cyan-400"
+          />
+          <span>
+            <span className="font-medium">Always LaTeX</span>
+            <span className="ml-1 text-zinc-500">
+              — student input renders as math while they type
+            </span>
+          </span>
+        </label>
+        <label className="inline-flex items-center gap-2 text-xs text-zinc-300">
+          <input
+            type="checkbox"
+            checked={!!block.caseSensitive}
+            onChange={(e) => onUpdate({ caseSensitive: e.target.checked })}
+            className="h-4 w-4 rounded border-zinc-700 bg-zinc-900 text-cyan-500 focus:ring-cyan-400"
+          />
+          <span>
+            <span className="font-medium">Case-sensitive</span>
+            <span className="ml-1 text-zinc-500">
+              — off by default; helpful for prose answers
+            </span>
+          </span>
+        </label>
+      </div>
+
+      <div>
+        <p className="mb-2 text-xs font-medium uppercase tracking-wider text-zinc-500">
+          Explanation (shown after answering)
+        </p>
+        <textarea
+          value={block.explanation ?? ""}
+          onChange={(e) => onUpdate({ explanation: e.target.value })}
+          rows={2}
+          placeholder="Optional — explain the reasoning"
+          suppressHydrationWarning
+          className={fieldClass}
+        />
+      </div>
     </div>
   );
 }
