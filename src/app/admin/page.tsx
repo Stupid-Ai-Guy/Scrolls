@@ -5,6 +5,7 @@ import { deleteLessonAction, logoutAction } from "@/lib/actions";
 import { dbAll, type LessonRow } from "@/lib/db";
 import { countBlocks, parseLessonContent } from "@/lib/lesson-content";
 import { gradeShortLabel, subjectPill } from "@/lib/curriculum";
+import ResetCompletionsButton from "./reset-completions-button";
 
 export default async function StudioPage() {
   const session = await getSession();
@@ -56,6 +57,7 @@ export default async function StudioPage() {
             >
               Terminal
             </Link>
+            <ResetCompletionsButton />
             <Link
               href="/dashboard"
               className="rounded-lg px-3 py-1.5 text-sm font-medium text-zinc-300 hover:bg-zinc-900 hover:text-zinc-100"

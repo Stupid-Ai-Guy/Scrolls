@@ -35,6 +35,7 @@ export default function LessonPlayer({
   blocks,
   stage = "initial",
   mastery = 0,
+  preview = false,
 }: {
   lessonId: number;
   title: string;
@@ -44,6 +45,7 @@ export default function LessonPlayer({
   blocks: Block[];
   stage?: "initial" | "day1" | "day3";
   mastery?: number;
+  preview?: boolean;
 }) {
   const [index, setIndex] = useState(0);
   const [questionState, setQuestionState] = useState<
@@ -103,11 +105,14 @@ export default function LessonPlayer({
   // so "Try again" → "complete" doesn't double-log.
   const recordedRef = useRef(false);
   useEffect(() => {
+    // Preview from the editor never records a completion — the author is
+    // QA'ing the lesson, not learning it.
+    if (preview) return;
     if (atEnd && total > 0 && !recordedRef.current) {
       recordedRef.current = true;
       recordLessonCompletionAction(lessonId, stage).catch(() => {});
     }
-  }, [atEnd, total, lessonId, stage]);
+  }, [atEnd, total, lessonId, stage, preview]);
 
   return (
     <div className="min-h-screen bg-black">
@@ -137,6 +142,11 @@ export default function LessonPlayer({
             style={{ width: `${progressPct}%` }}
           />
         </div>
+        {preview && (
+          <div className="border-t border-amber-500/30 bg-amber-500/10 px-6 py-1.5 text-center text-[11px] font-medium uppercase tracking-[0.18em] text-amber-300">
+            Preview mode · completion is not recorded
+          </div>
+        )}
       </header>
 
       <main className="mx-auto max-w-2xl px-6 py-12">

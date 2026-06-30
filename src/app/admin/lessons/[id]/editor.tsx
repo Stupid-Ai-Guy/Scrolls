@@ -233,9 +233,10 @@ export default function LessonEditor({
               )}
             </button>
             <Link
-              href={`/lessons/${lessonId}`}
+              href={`/lessons/${lessonId}?preview=1`}
               target="_blank"
               className="rounded-lg px-3 py-1.5 text-sm font-medium text-zinc-300 hover:bg-zinc-900 hover:text-zinc-100"
+              title="Preview as the author — completion isn't recorded and reviews aren't gated"
             >
               Preview
             </Link>

@@ -150,6 +150,16 @@ export async function logoutAction(): Promise<void> {
   redirect("/login");
 }
 
+// Admin-only debug action: drops every row from lesson_completions, for
+// every user. Intended for clearing out test data while iterating on the
+// spaced-repetition flow. The caller is expected to confirm in the UI
+// before invoking — there's no soft-delete or undo.
+export async function clearAllCompletionsAction(): Promise<void> {
+  const session = await getSession();
+  if (!session || session.role !== "admin") return;
+  await dbExec("DELETE FROM lesson_completions", []);
+}
+
 export async function recordLessonCompletionAction(
   lessonId: number,
   stage: "initial" | "day1" | "day3" = "initial",
