@@ -94,6 +94,13 @@ async function _init(): Promise<void> {
   );
   await ensureColumn("users", "role", "TEXT NOT NULL DEFAULT 'user'");
   await ensureColumn("lessons", "category_id", "INTEGER");
+  // 'initial' = first time the learner finished the lesson;
+  // 'day1' / 'day3' = subsequent spaced-repetition review sets.
+  await ensureColumn(
+    "lesson_completions",
+    "stage",
+    "TEXT NOT NULL DEFAULT 'initial'",
+  );
 }
 
 function init(): Promise<void> {

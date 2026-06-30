@@ -30,6 +30,8 @@ export default function LessonPlayer({
   subject,
   grade,
   blocks,
+  stage = "initial",
+  mastery = 0,
 }: {
   lessonId: number;
   title: string;
@@ -37,6 +39,8 @@ export default function LessonPlayer({
   subject: string;
   grade: number;
   blocks: Block[];
+  stage?: "initial" | "day1" | "day3";
+  mastery?: number;
 }) {
   const [index, setIndex] = useState(0);
   const [questionState, setQuestionState] = useState<
@@ -86,9 +90,9 @@ export default function LessonPlayer({
   useEffect(() => {
     if (atEnd && total > 0 && !recordedRef.current) {
       recordedRef.current = true;
-      recordLessonCompletionAction(lessonId).catch(() => {});
+      recordLessonCompletionAction(lessonId, stage).catch(() => {});
     }
-  }, [atEnd, total, lessonId]);
+  }, [atEnd, total, lessonId, stage]);
 
   return (
     <div className="min-h-screen bg-black">
@@ -149,6 +153,11 @@ export default function LessonPlayer({
             correct={correctSoFar}
             totalQuestions={totalQuestions}
             backHref={backHref}
+            stage={stage}
+            // After this stage records, mastery jumps to the *next*
+            // threshold — show that as the new value so the user feels
+            // the progression.
+            masteryBefore={mastery}
             onRestart={() => {
               setIndex(0);
               setQuestionState({});
@@ -223,17 +232,48 @@ function CompletionCard({
   correct,
   totalQuestions,
   backHref,
+  stage,
+  masteryBefore,
   onRestart,
 }: {
   title: string;
   correct: number;
   totalQuestions: number;
   backHref: string;
+  stage: "initial" | "day1" | "day3";
+  masteryBefore: number;
   onRestart: () => void;
 }) {
+  // After this stage was just recorded, mastery advances:
+  //   initial → 33%, day1 → 66%, day3 → 100%.
+  const masteryAfter =
+    stage === "day3" ? 1 : stage === "day1" ? 0.66 : 0.33;
+  const masteryAfterPct = Math.round(masteryAfter * 100);
+  const masteryBeforePct = Math.round(masteryBefore * 100);
+  const justMastered = stage === "day3";
+  const headline =
+    stage === "initial"
+      ? "Lesson complete"
+      : stage === "day1"
+        ? "Day +1 review complete"
+        : "Day +3 review complete";
+  const nextHint =
+    stage === "initial"
+      ? "Come back in a day for the Day +1 review."
+      : stage === "day1"
+        ? "Two more days to lock it in with the Day +3 review."
+        : "You mastered this skill.";
+
   return (
     <div className="rounded-2xl bg-zinc-950 p-10 text-center ring-1 ring-zinc-800">
-      <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-cyan-500/10 text-cyan-300 ring-1 ring-cyan-500/30">
+      <div
+        className={
+          "mx-auto flex h-12 w-12 items-center justify-center rounded-full ring-1 " +
+          (justMastered
+            ? "bg-emerald-500/10 text-emerald-300 ring-emerald-500/30"
+            : "bg-cyan-500/10 text-cyan-300 ring-cyan-500/30")
+        }
+      >
         <svg
           className="h-6 w-6"
           viewBox="0 0 24 24"
@@ -249,7 +289,7 @@ function CompletionCard({
         </svg>
       </div>
       <h2 className="mt-4 text-2xl font-semibold tracking-tight text-zinc-100">
-        Lesson complete
+        {headline}
       </h2>
       <p className="mt-1 text-sm text-zinc-400">{title}</p>
       {totalQuestions > 0 && (
@@ -258,6 +298,22 @@ function CompletionCard({
           <span className="text-zinc-500"> / {totalQuestions} correct</span>
         </p>
       )}
+
+      <div className="mt-6 inline-flex flex-col items-center gap-1">
+        <span className="text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
+          Mastery
+        </span>
+        <span
+          className={
+            "text-3xl font-semibold " +
+            (justMastered ? "text-emerald-300" : "text-zinc-100")
+          }
+        >
+          {masteryBeforePct}% → {masteryAfterPct}%
+        </span>
+      </div>
+      <p className="mx-auto mt-4 max-w-sm text-sm text-zinc-400">{nextHint}</p>
+
       <div className="mt-6 flex items-center justify-center gap-2">
         <button
           type="button"

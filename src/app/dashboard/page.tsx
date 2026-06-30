@@ -9,11 +9,18 @@ import {
   parseGrade,
   type SubjectId,
 } from "@/lib/curriculum";
+import { parseLessonContent } from "@/lib/lesson-content";
+import {
+  computeAllProgress,
+  type CompletionRow,
+  type LessonProgress,
+  type LessonRepetitionInfo,
+} from "@/lib/spaced-repetition";
 
 type LessonCard = Pick<
   LessonRow,
   "id" | "title" | "description" | "category_id"
->;
+> & { content: string };
 
 const SUBJECTS: ReadonlyArray<{
   id: SubjectId;
@@ -86,7 +93,7 @@ export default async function DashboardPage({
   const grade = parseGrade(params.grade);
 
   const lessons = await dbAll<LessonCard>(
-    "SELECT id, title, description, category_id FROM lessons WHERE grade = $1 AND subject = $2 ORDER BY created_at ASC",
+    "SELECT id, title, description, category_id, content FROM lessons WHERE grade = $1 AND subject = $2 ORDER BY created_at ASC",
     [grade, subject.id],
   );
 
@@ -95,13 +102,51 @@ export default async function DashboardPage({
     [subject.id, grade],
   );
 
-  const completionRows = await dbAll<{ lesson_id: number; completed_at: number }>(
-    "SELECT lesson_id, completed_at FROM lesson_completions WHERE user_id = $1 ORDER BY completed_at DESC",
+  const completionRows = await dbAll<CompletionRow>(
+    "SELECT lesson_id, stage, completed_at FROM lesson_completions WHERE user_id = $1 ORDER BY completed_at DESC",
     [session.userId],
   );
 
-  const masteredCount = new Set(completionRows.map((r) => r.lesson_id)).size;
+  // Build per-lesson repetition info from the lessons in this dashboard view,
+  // then compute mastery / review status for each one.
+  const lessonInfo = new Map<number, LessonRepetitionInfo>();
+  for (const l of lessons) {
+    const parsed = parseLessonContent(l.content);
+    lessonInfo.set(l.id, {
+      hasDay1: (parsed.repetitionSets?.day1.length ?? 0) > 0,
+      hasDay3: (parsed.repetitionSets?.day3.length ?? 0) > 0,
+    });
+  }
+  const progressByLesson = computeAllProgress(completionRows, lessonInfo);
+
+  // "Mastered" means fully done — either day3 finished, or 'initial'
+  // finished on a lesson with no further sets (mastery === 1).
+  let masteredCount = 0;
+  let reviewsDueNow = 0;
+  for (const p of progressByLesson.values()) {
+    if (p.mastery >= 1) masteredCount++;
+    if (p.reviewDueNow) reviewsDueNow++;
+  }
   const streakCount = computeStreak(completionRows.map((r) => r.completed_at));
+
+  // Reviews due across every subject/grade — not just the current view.
+  // Pull all lessons (just id + content) and their completions so we can
+  // surface the global count even when the learner is browsing math but
+  // has a science review unlocked.
+  const allLessonRows = await dbAll<{ id: number; content: string }>(
+    "SELECT id, content FROM lessons",
+  );
+  const allLessonInfo = new Map<number, LessonRepetitionInfo>();
+  for (const l of allLessonRows) {
+    const parsed = parseLessonContent(l.content);
+    allLessonInfo.set(l.id, {
+      hasDay1: (parsed.repetitionSets?.day1.length ?? 0) > 0,
+      hasDay3: (parsed.repetitionSets?.day3.length ?? 0) > 0,
+    });
+  }
+  const allProgress = computeAllProgress(completionRows, allLessonInfo);
+  let totalReviewsDue = 0;
+  for (const p of allProgress.values()) if (p.reviewDueNow) totalReviewsDue++;
 
   const groups = groupLessonsByCategory(lessons, categoryRows);
   const isAdmin = session.role === "admin";
@@ -274,7 +319,11 @@ export default async function DashboardPage({
                 gradeLabel={gradeLongLabel(grade)}
               />
             ) : (
-              <CategorySections groups={groups} pillClass={subject.pill} />
+              <CategorySections
+                groups={groups}
+                pillClass={subject.pill}
+                progressByLesson={progressByLesson}
+              />
             )}
           </section>
 
@@ -295,8 +344,20 @@ export default async function DashboardPage({
               value={String(masteredCount)}
               hint={
                 masteredCount === 0
-                  ? "Finish a lesson to master your first skill."
+                  ? "Finish a lesson and its reviews to master your first skill."
                   : "Mastery unlocks the next topic."
+              }
+            />
+            <SidebarCard
+              title="Reviews due"
+              value={String(totalReviewsDue)}
+              accent={totalReviewsDue > 0 ? "cyan" : undefined}
+              hint={
+                totalReviewsDue === 0
+                  ? "No spaced-repetition reviews unlocked right now."
+                  : reviewsDueNow > 0 && reviewsDueNow !== totalReviewsDue
+                    ? `${reviewsDueNow} in this view · ${totalReviewsDue} total across subjects.`
+                    : `Open a lesson with a review badge to bring it up.`
               }
             />
             <div className="rounded-2xl bg-gradient-to-br from-cyan-500/10 via-zinc-950 to-zinc-950 p-5 ring-1 ring-cyan-500/20">
@@ -410,9 +471,11 @@ function groupLessonsByCategory(
 function CategorySections({
   groups,
   pillClass,
+  progressByLesson,
 }: {
   groups: LessonGroup[];
   pillClass: string;
+  progressByLesson: Map<number, LessonProgress>;
 }) {
   if (groups.length === 0) return null;
   return (
@@ -432,42 +495,69 @@ function CategorySections({
             </span>
           </div>
           <ul className="space-y-2">
-            {group.lessons.map((l, i) => (
-              <li key={l.id}>
-                <Link
-                  href={`/lessons/${l.id}`}
-                  className="group flex items-center gap-4 rounded-xl bg-zinc-950 px-5 py-4 ring-1 ring-zinc-800 transition hover:bg-zinc-900 hover:ring-cyan-400/60"
-                >
-                  <span
-                    className={`inline-flex h-9 min-w-9 items-center justify-center rounded-lg px-2 text-xs font-bold ${pillClass}`}
+            {group.lessons.map((l, i) => {
+              const p = progressByLesson.get(l.id);
+              const masteryPct = p ? Math.round(p.mastery * 100) : 0;
+              const reviewDue = p?.reviewDueNow ?? false;
+              const mastered = (p?.mastery ?? 0) >= 1;
+              return (
+                <li key={l.id}>
+                  <Link
+                    href={`/lessons/${l.id}`}
+                    className={
+                      "group flex items-center gap-4 rounded-xl px-5 py-4 ring-1 transition " +
+                      (reviewDue
+                        ? "bg-cyan-500/5 ring-cyan-500/40 hover:bg-cyan-500/10 hover:ring-cyan-400/70"
+                        : "bg-zinc-950 ring-zinc-800 hover:bg-zinc-900 hover:ring-cyan-400/60")
+                    }
                   >
-                    {group.letter}.{i + 1}
-                  </span>
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate text-sm font-medium text-zinc-100">
-                      {l.title}
-                    </p>
-                    {l.description && (
-                      <p className="truncate text-xs text-zinc-500">
-                        {l.description}
+                    <span
+                      className={`inline-flex h-9 min-w-9 items-center justify-center rounded-lg px-2 text-xs font-bold ${pillClass}`}
+                    >
+                      {group.letter}.{i + 1}
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-medium text-zinc-100">
+                        {l.title}
                       </p>
+                      {l.description && (
+                        <p className="truncate text-xs text-zinc-500">
+                          {l.description}
+                        </p>
+                      )}
+                    </div>
+                    {reviewDue && (
+                      <span className="hidden rounded-full bg-cyan-500/15 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-cyan-300 ring-1 ring-cyan-500/40 sm:inline">
+                        Review
+                      </span>
                     )}
-                  </div>
-                  <svg
-                    className="h-4 w-4 text-zinc-700 transition group-hover:text-cyan-400"
-                    viewBox="0 0 20 20"
-                    fill="currentColor"
-                    aria-hidden="true"
-                  >
-                    <path
-                      fillRule="evenodd"
-                      d="M7.21 14.77a.75.75 0 01.02-1.06L11.168 10 7.23 6.29a.75.75 0 111.04-1.08l4.5 4.25a.75.75 0 010 1.08l-4.5 4.25a.75.75 0 01-1.06-.02z"
-                      clipRule="evenodd"
-                    />
-                  </svg>
-                </Link>
-              </li>
-            ))}
+                    {p && p.mastery > 0 && (
+                      <span
+                        className={
+                          "shrink-0 text-[11px] font-semibold tabular-nums " +
+                          (mastered ? "text-emerald-300" : "text-zinc-400")
+                        }
+                        title={`Mastery ${masteryPct}%`}
+                      >
+                        {masteryPct}%
+                      </span>
+                    )}
+                    <svg
+                      className="h-4 w-4 text-zinc-700 transition group-hover:text-cyan-400"
+                      viewBox="0 0 20 20"
+                      fill="currentColor"
+                      aria-hidden="true"
+                    >
+                      <path
+                        fillRule="evenodd"
+                        d="M7.21 14.77a.75.75 0 01.02-1.06L11.168 10 7.23 6.29a.75.75 0 111.04-1.08l4.5 4.25a.75.75 0 010 1.08l-4.5 4.25a.75.75 0 01-1.06-.02z"
+                        clipRule="evenodd"
+                      />
+                    </svg>
+                  </Link>
+                </li>
+              );
+            })}
           </ul>
         </section>
       ))}
@@ -508,20 +598,46 @@ function SidebarCard({
   title,
   value,
   hint,
+  accent,
 }: {
   title: string;
   value: string;
   hint: string;
+  accent?: "cyan";
 }) {
   return (
-    <div className="rounded-2xl bg-zinc-950 p-5 ring-1 ring-zinc-800">
-      <p className="text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
+    <div
+      className={
+        "rounded-2xl p-5 ring-1 " +
+        (accent === "cyan"
+          ? "bg-cyan-500/5 ring-cyan-500/30"
+          : "bg-zinc-950 ring-zinc-800")
+      }
+    >
+      <p
+        className={
+          "text-xs font-semibold uppercase tracking-[0.2em] " +
+          (accent === "cyan" ? "text-cyan-300" : "text-zinc-500")
+        }
+      >
         {title}
       </p>
-      <p className="mt-2 text-3xl font-semibold tracking-tight text-zinc-50">
+      <p
+        className={
+          "mt-2 text-3xl font-semibold tracking-tight " +
+          (accent === "cyan" ? "text-cyan-100" : "text-zinc-50")
+        }
+      >
         {value}
       </p>
-      <p className="mt-1 text-xs text-zinc-500">{hint}</p>
+      <p
+        className={
+          "mt-1 text-xs " +
+          (accent === "cyan" ? "text-cyan-200/80" : "text-zinc-500")
+        }
+      >
+        {hint}
+      </p>
     </div>
   );
 }

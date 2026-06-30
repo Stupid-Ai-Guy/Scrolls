@@ -152,18 +152,20 @@ export async function logoutAction(): Promise<void> {
 
 export async function recordLessonCompletionAction(
   lessonId: number,
+  stage: "initial" | "day1" | "day3" = "initial",
 ): Promise<void> {
   const session = await getSession();
   if (!session) return;
   if (!Number.isInteger(lessonId) || lessonId <= 0) return;
+  if (stage !== "initial" && stage !== "day1" && stage !== "day3") return;
   const lesson = await dbGet<{ id: number }>(
     "SELECT id FROM lessons WHERE id = $1",
     [lessonId],
   );
   if (!lesson) return;
   await dbExec(
-    "INSERT INTO lesson_completions (user_id, lesson_id, completed_at) VALUES ($1, $2, $3)",
-    [session.userId, lessonId, Date.now()],
+    "INSERT INTO lesson_completions (user_id, lesson_id, stage, completed_at) VALUES ($1, $2, $3, $4)",
+    [session.userId, lessonId, stage, Date.now()],
   );
 }
 
