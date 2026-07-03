@@ -2,6 +2,7 @@ import { notFound, redirect } from "next/navigation";
 import { getSession } from "@/lib/session";
 import { dbAll, dbGet, type CategoryRow, type LessonRow } from "@/lib/db";
 import { parseLessonContent } from "@/lib/lesson-content";
+import { getTheme } from "@/lib/theme";
 import LessonEditor from "./editor";
 
 export default async function LessonEditorPage({
@@ -48,6 +49,7 @@ export default async function LessonEditorPage({
       initialRepetitionSets={
         content.repetitionSets ?? { day1: [], day3: [] }
       }
+      theme={await getTheme()}
       categories={categories.map((c) => ({
         id: c.id,
         subject: c.subject,

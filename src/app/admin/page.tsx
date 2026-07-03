@@ -5,12 +5,15 @@ import { deleteLessonAction, logoutAction } from "@/lib/actions";
 import { dbAll, type LessonRow } from "@/lib/db";
 import { countBlocks, parseLessonContent } from "@/lib/lesson-content";
 import { gradeShortLabel, subjectPill } from "@/lib/curriculum";
+import { getTheme } from "@/lib/theme";
+import ThemeToggle from "@/components/theme-toggle";
 import ResetCompletionsButton from "./reset-completions-button";
 
 export default async function StudioPage() {
   const session = await getSession();
   if (!session) redirect("/login");
   if (session.role !== "admin") redirect("/dashboard");
+  const theme = await getTheme();
 
   const lessons = await dbAll<LessonRow>(
     "SELECT id, title, description, content, grade, subject, category_id, created_by, created_at FROM lessons ORDER BY created_at DESC",
@@ -58,6 +61,7 @@ export default async function StudioPage() {
               Terminal
             </Link>
             <ResetCompletionsButton />
+            <ThemeToggle theme={theme} />
             <Link
               href="/dashboard"
               className="rounded-lg px-3 py-1.5 text-sm font-medium text-zinc-300 hover:bg-zinc-900 hover:text-zinc-100"

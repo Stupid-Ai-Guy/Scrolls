@@ -2,9 +2,27 @@
 
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
+import { cookies } from "next/headers";
 import bcrypt from "bcryptjs";
 import { dbExec, dbGet, type UserRow } from "./db";
 import { createSession, destroySession, getSession } from "./session";
+
+export type Theme = "light" | "dark";
+const THEME_COOKIE = "scrolls-theme";
+
+// Called from the ThemeToggle client component. Writes the preference to a
+// long-lived cookie so the root layout can server-render the right class
+// on <html> — no first-paint flash when switching pages or reloading.
+export async function setThemeAction(theme: Theme): Promise<void> {
+  if (theme !== "light" && theme !== "dark") return;
+  const jar = await cookies();
+  jar.set(THEME_COOKIE, theme, {
+    path: "/",
+    httpOnly: false,
+    sameSite: "lax",
+    maxAge: 60 * 60 * 24 * 365,
+  });
+}
 
 export type FormState = { error?: string; ok?: boolean };
 

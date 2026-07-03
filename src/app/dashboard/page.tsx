@@ -16,6 +16,8 @@ import {
   type LessonProgress,
   type LessonRepetitionInfo,
 } from "@/lib/spaced-repetition";
+import { getTheme } from "@/lib/theme";
+import ThemeToggle from "@/components/theme-toggle";
 
 type LessonCard = Pick<
   LessonRow,
@@ -151,6 +153,7 @@ export default async function DashboardPage({
   const groups = groupLessonsByCategory(lessons, categoryRows);
   const isAdmin = session.role === "admin";
   const initial = session.email.charAt(0).toUpperCase();
+  const theme = await getTheme();
 
   return (
     <div className="min-h-screen bg-black">
@@ -193,6 +196,7 @@ export default async function DashboardPage({
                 Manage lessons
               </Link>
             )}
+            <ThemeToggle theme={theme} />
             <form action={logoutAction}>
               <button
                 type="submit"

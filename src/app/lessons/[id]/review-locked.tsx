@@ -5,6 +5,8 @@ import {
   normalizeSubject,
   subjectPill,
 } from "@/lib/curriculum";
+import ThemeToggle from "@/components/theme-toggle";
+import type { Theme } from "@/lib/theme";
 
 export default function ReviewLocked({
   lessonId,
@@ -14,6 +16,7 @@ export default function ReviewLocked({
   completedStage,
   mastery,
   reviewDueAt,
+  theme,
 }: {
   lessonId: number;
   title: string;
@@ -22,6 +25,7 @@ export default function ReviewLocked({
   completedStage: "initial" | "day1" | "day3";
   mastery: number;
   reviewDueAt: number | null;
+  theme: Theme;
 }) {
   const backHref = `/dashboard?subject=${normalizeSubject(subject)}&grade=${gradeParam(grade)}`;
   const isMastered = completedStage === "day3";
@@ -58,12 +62,15 @@ export default function ReviewLocked({
               {title}
             </p>
           </div>
-          <Link
-            href={backHref}
-            className="rounded-lg px-3 py-1.5 text-sm font-medium text-zinc-400 hover:bg-zinc-900 hover:text-zinc-100"
-          >
-            Close
-          </Link>
+          <div className="flex items-center gap-1">
+            <ThemeToggle theme={theme} />
+            <Link
+              href={backHref}
+              className="rounded-lg px-3 py-1.5 text-sm font-medium text-zinc-400 hover:bg-zinc-900 hover:text-zinc-100"
+            >
+              Close
+            </Link>
+          </div>
         </div>
       </header>
 

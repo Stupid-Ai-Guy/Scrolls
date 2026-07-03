@@ -27,3 +27,120 @@ body {
 input[type="range"]::-webkit-slider-thumb {
   background: #22d3ee;
 }
+
+/* ---------- Light theme ----------
+   The app is dark by default. When the `theme-light` class is present on
+   <html>, the following rules invert the base zinc palette so the app
+   reads as a light UI. Accents (cyan / emerald / amber / rose / violet)
+   are left alone since they work in both modes. Only opaque tokens are
+   listed here — transparent variants generally fall through to the base
+   layer and read fine in either mode.
+   ------------------------------- */
+
+:root.theme-light {
+  color-scheme: light;
+}
+:root.theme-light,
+:root.theme-light body {
+  background-color: #f8fafc;
+  color: #18181b;
+}
+:root.theme-light ::selection {
+  background: rgba(34, 211, 238, 0.35);
+}
+
+/* Backgrounds */
+:root.theme-light .bg-black {
+  background-color: #f8fafc;
+}
+:root.theme-light .bg-zinc-950 {
+  background-color: #ffffff;
+}
+:root.theme-light .bg-zinc-900 {
+  background-color: #f1f5f9;
+}
+:root.theme-light .bg-zinc-800 {
+  background-color: #e2e8f0;
+}
+/* Common translucent header backgrounds */
+:root.theme-light .bg-black\/85,
+:root.theme-light .bg-black\/80,
+:root.theme-light .bg-black\/70 {
+  background-color: rgba(255, 255, 255, 0.85);
+}
+:root.theme-light .bg-zinc-950\/95,
+:root.theme-light .bg-zinc-950\/85,
+:root.theme-light .bg-zinc-950\/80,
+:root.theme-light .bg-zinc-950\/60,
+:root.theme-light .bg-zinc-950\/40 {
+  background-color: rgba(255, 255, 255, 0.95);
+}
+:root.theme-light .bg-zinc-900\/95,
+:root.theme-light .bg-zinc-900\/80,
+:root.theme-light .bg-zinc-900\/60,
+:root.theme-light .bg-zinc-900\/40 {
+  background-color: rgba(241, 245, 249, 0.85);
+}
+
+/* Text */
+:root.theme-light .text-zinc-50,
+:root.theme-light .text-zinc-100,
+:root.theme-light .text-zinc-200 {
+  color: #18181b;
+}
+:root.theme-light .text-zinc-300 {
+  color: #27272a;
+}
+:root.theme-light .text-zinc-400 {
+  color: #3f3f46;
+}
+:root.theme-light .text-zinc-500 {
+  color: #52525b;
+}
+:root.theme-light .text-zinc-600 {
+  color: #71717a;
+}
+:root.theme-light .text-zinc-700 {
+  color: #a1a1aa;
+}
+
+/* Rings */
+:root.theme-light .ring-zinc-800,
+:root.theme-light .ring-zinc-900 {
+  --tw-ring-color: #e2e8f0;
+}
+:root.theme-light .ring-white\/5,
+:root.theme-light .ring-white\/10 {
+  --tw-ring-color: rgba(0, 0, 0, 0.08);
+}
+
+/* Borders */
+:root.theme-light .border-zinc-800,
+:root.theme-light .border-zinc-900 {
+  border-color: #e2e8f0;
+}
+
+/* Hover states — invert only when the base is a dark zinc */
+:root.theme-light .hover\:bg-zinc-900:hover {
+  background-color: #f1f5f9;
+}
+:root.theme-light .hover\:bg-zinc-800:hover {
+  background-color: #e2e8f0;
+}
+:root.theme-light .hover\:bg-zinc-950:hover {
+  background-color: #ffffff;
+}
+:root.theme-light .hover\:text-zinc-100:hover,
+:root.theme-light .hover\:text-zinc-200:hover {
+  color: #18181b;
+}
+
+/* Placeholder text in inputs */
+:root.theme-light .placeholder\:text-zinc-600::placeholder,
+:root.theme-light .placeholder\:text-zinc-500::placeholder {
+  color: #94a3b8;
+}
+
+/* Cyan-accented buttons ("Save", "New lesson", etc.) already have a
+   black text color that reads well on cyan in either mode. No override
+   needed. Scene canvas + code editor internals stay dark on purpose. */

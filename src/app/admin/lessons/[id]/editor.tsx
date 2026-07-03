@@ -21,6 +21,8 @@ import {
   SceneRunner,
 } from "@/components/scene-editor";
 import type { Scene } from "@/lib/lesson-content";
+import ThemeToggle from "@/components/theme-toggle";
+import type { Theme } from "@/lib/theme";
 
 type SubjectId = "math" | "language" | "science";
 type EditorBlock = Block & { _key: string };
@@ -55,6 +57,7 @@ export default function LessonEditor({
   initialCategoryId,
   initialBlocks,
   initialRepetitionSets,
+  theme,
   categories,
 }: {
   lessonId: number;
@@ -65,6 +68,7 @@ export default function LessonEditor({
   initialCategoryId: number | null;
   initialBlocks: Block[];
   initialRepetitionSets: RepetitionSets;
+  theme: Theme;
   categories: CategoryOption[];
 }) {
   const [title, setTitle] = useState(initialTitle);
@@ -314,6 +318,7 @@ export default function LessonEditor({
             >
               Preview
             </Link>
+            <ThemeToggle theme={theme} />
             <form action={formAction}>
               <input type="hidden" name="id" value={lessonId} />
               <input type="hidden" name="title" value={title} />

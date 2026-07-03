@@ -15,6 +15,8 @@ import { recordLessonCompletionAction } from "@/lib/actions";
 import ScrollScriptRunner from "@/components/scrollscript-runner";
 import { SceneRunner } from "@/components/scene-editor";
 import { RichText } from "@/lib/rich-text";
+import ThemeToggle from "@/components/theme-toggle";
+import type { Theme } from "@/lib/theme";
 import {
   gradeLongLabel,
   gradeParam,
@@ -36,6 +38,7 @@ export default function LessonPlayer({
   stage = "initial",
   mastery = 0,
   preview = false,
+  theme,
 }: {
   lessonId: number;
   title: string;
@@ -46,6 +49,7 @@ export default function LessonPlayer({
   stage?: "initial" | "day1" | "day3";
   mastery?: number;
   preview?: boolean;
+  theme: Theme;
 }) {
   const [index, setIndex] = useState(0);
   const [questionState, setQuestionState] = useState<
@@ -129,12 +133,15 @@ export default function LessonPlayer({
               {title}
             </p>
           </div>
-          <Link
-            href={backHref}
-            className="rounded-lg px-3 py-1.5 text-sm font-medium text-zinc-400 hover:bg-zinc-900 hover:text-zinc-100"
-          >
-            Close
-          </Link>
+          <div className="flex items-center gap-1">
+            <ThemeToggle theme={theme} />
+            <Link
+              href={backHref}
+              className="rounded-lg px-3 py-1.5 text-sm font-medium text-zinc-400 hover:bg-zinc-900 hover:text-zinc-100"
+            >
+              Close
+            </Link>
+          </div>
         </div>
         <div className="h-1 w-full bg-zinc-900">
           <div

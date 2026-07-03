@@ -6,6 +6,7 @@ import {
   computeLessonProgress,
   type CompletionRow,
 } from "@/lib/spaced-repetition";
+import { getTheme } from "@/lib/theme";
 import LessonPlayer from "./player";
 import ReviewLocked from "./review-locked";
 
@@ -30,6 +31,7 @@ export default async function LessonPage({
   // no locked-review panel).
   const sp = await searchParams;
   const preview = sp.preview === "1" && session.role === "admin";
+  const theme = await getTheme();
 
   const lesson = await dbGet<LessonRow>(
     "SELECT id, title, description, content, grade, subject, created_by, created_at FROM lessons WHERE id = $1",
@@ -86,6 +88,7 @@ export default async function LessonPage({
           completedStage={progress.completedStage}
           mastery={progress.mastery}
           reviewDueAt={progress.reviewDueAt ?? 0}
+          theme={theme}
         />
       );
     }
@@ -103,6 +106,7 @@ export default async function LessonPage({
           completedStage="day3"
           mastery={1}
           reviewDueAt={null}
+          theme={theme}
         />
       );
     }
@@ -119,6 +123,7 @@ export default async function LessonPage({
       stage={stage}
       mastery={progress.mastery}
       preview={preview}
+      theme={theme}
     />
   );
 }
