@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useActionState, useState } from "react";
+import { useActionState, useEffect, useState } from "react";
 import { saveLessonAction, type FormState } from "@/lib/actions";
 import {
   emptyBlock,
@@ -85,6 +85,36 @@ export default function LessonEditor({
   const repetitionCount =
     repetitionSets.day1.length + repetitionSets.day3.length;
 
+  // Cross-editor block clipboard, persisted in localStorage so copy in one
+  // lesson → paste in another (or after a page reload) both work.
+  const [clipboard, setClipboardState] = useState<Block | null>(null);
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem("scrolls-block-clipboard");
+      if (!raw) return;
+      const parsed = JSON.parse(raw) as Block;
+      // Trust the shape lightly: only accept known block types.
+      if (
+        parsed &&
+        typeof parsed === "object" &&
+        typeof (parsed as Block).type === "string"
+      ) {
+        setClipboardState(parsed);
+      }
+    } catch {
+      /* ignore corrupt clipboard */
+    }
+  }, []);
+  function setClipboard(next: Block | null) {
+    setClipboardState(next);
+    try {
+      if (next === null) localStorage.removeItem("scrolls-block-clipboard");
+      else localStorage.setItem("scrolls-block-clipboard", JSON.stringify(next));
+    } catch {
+      /* storage full / disabled — clipboard remains in-memory this session */
+    }
+  }
+
   const availableCategories = categories.filter(
     (c) => c.subject === subject && c.grade === grade,
   );
@@ -155,6 +185,50 @@ export default function LessonEditor({
       [next[index], next[j]] = [next[j], next[index]];
       return next;
     });
+  }
+
+  function copyBlock(index: number) {
+    const b = blocks[index];
+    if (!b) return;
+    // Store without the editor-only _key so the paste path can mint a fresh
+    // one instead of re-using the source's key.
+    setClipboard(stripKey(b));
+  }
+
+  function pasteBlock() {
+    if (!clipboard) return;
+    setBlocks((bs) => [...bs, withKey(clipboard)]);
+  }
+
+  // Toggle a question block ↔ writing block, preserving the fields that
+  // both types share (prompt, explanation, imageUrl). Type-specific fields
+  // are dropped on the way out and freshly initialized on the way in.
+  function toggleWriting(index: number) {
+    setBlocks((bs) =>
+      bs.map((b, i) => {
+        if (i !== index) return b;
+        if (b.type === "question") {
+          return withKey({
+            type: "writing",
+            prompt: b.prompt,
+            acceptedAnswers: [""],
+            explanation: b.explanation,
+            imageUrl: b.imageUrl,
+          });
+        }
+        if (b.type === "writing") {
+          return withKey({
+            type: "question",
+            prompt: b.prompt,
+            options: ["", ""],
+            correctIndex: 0,
+            explanation: b.explanation,
+            imageUrl: b.imageUrl,
+          });
+        }
+        return b;
+      }),
+    );
   }
 
   const hasRepetition =
@@ -396,7 +470,12 @@ export default function LessonEditor({
                 Add explanation pages, diagrams, multiple-choice questions, and
                 ScrollScript-coded interactives in any order.
               </p>
-              <AddBlockBar onAdd={addBlock} className="mt-5" />
+              <AddBlockBar
+                onAdd={addBlock}
+                onPaste={clipboard ? pasteBlock : undefined}
+                clipboardType={clipboard?.type}
+                className="mt-5"
+              />
             </div>
           ) : (
             <ul className="mt-4 space-y-3">
@@ -409,6 +488,12 @@ export default function LessonEditor({
                     onUpdate={(patch) => updateBlock(i, patch)}
                     onRemove={() => removeBlock(i)}
                     onMove={(d) => moveBlock(i, d)}
+                    onCopy={() => copyBlock(i)}
+                    onToggleWriting={
+                      b.type === "question" || b.type === "writing"
+                        ? () => toggleWriting(i)
+                        : undefined
+                    }
                   />
                 </li>
               ))}
@@ -417,7 +502,11 @@ export default function LessonEditor({
 
           {blocks.length > 0 && (
             <div className="mt-6">
-              <AddBlockBar onAdd={addBlock} />
+              <AddBlockBar
+                onAdd={addBlock}
+                onPaste={clipboard ? pasteBlock : undefined}
+                clipboardType={clipboard?.type}
+              />
             </div>
           )}
         </section>
@@ -667,11 +756,22 @@ function RepetitionSetModal({
 
 function AddBlockBar({
   onAdd,
+  onPaste,
+  clipboardType,
   className = "",
 }: {
   onAdd: (type: BlockType) => void;
+  onPaste?: () => void;
+  clipboardType?: BlockType;
   className?: string;
 }) {
+  const pasteLabels: Record<BlockType, string> = {
+    text: "explanation",
+    image: "diagram",
+    question: "question",
+    writing: "writing",
+    interactive: "interactive",
+  };
   return (
     <div
       className={`flex flex-wrap items-center justify-center gap-2 ${className}`}
@@ -699,18 +799,33 @@ function AddBlockBar({
       </button>
       <button
         type="button"
-        onClick={() => onAdd("writing")}
-        className="rounded-lg bg-zinc-950 px-3.5 py-2 text-sm font-medium text-zinc-300 ring-1 ring-zinc-800 hover:bg-zinc-900"
-      >
-        + Writing
-      </button>
-      <button
-        type="button"
         onClick={() => onAdd("interactive")}
         className="rounded-lg bg-cyan-500 px-3.5 py-2 text-sm font-semibold text-black hover:bg-cyan-400"
       >
         + Interactive
       </button>
+      {onPaste && clipboardType && (
+        <button
+          type="button"
+          onClick={onPaste}
+          title={`Paste the ${pasteLabels[clipboardType]} block from the clipboard`}
+          className="inline-flex items-center gap-1.5 rounded-lg bg-zinc-900 px-3.5 py-2 text-sm font-medium text-cyan-300 ring-1 ring-cyan-500/40 transition hover:bg-cyan-500/10"
+        >
+          <svg
+            viewBox="0 0 16 16"
+            className="h-3.5 w-3.5"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.7"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
+            <rect x="4" y="3" width="8" height="10" rx="1.2" />
+            <path d="M6 3v-.5A.5.5 0 0 1 6.5 2h3a.5.5 0 0 1 .5.5V3" />
+          </svg>
+          + Paste ({pasteLabels[clipboardType]})
+        </button>
+      )}
     </div>
   );
 }
@@ -746,6 +861,8 @@ function BlockCard({
   onUpdate,
   onRemove,
   onMove,
+  onCopy,
+  onToggleWriting,
 }: {
   block: EditorBlock;
   index: number;
@@ -753,32 +870,96 @@ function BlockCard({
   onUpdate: (patch: Partial<Block>) => void;
   onRemove: () => void;
   onMove: (dir: -1 | 1) => void;
+  onCopy: () => void;
+  onToggleWriting?: () => void;
 }) {
+  const [copied, setCopied] = useState(false);
+  function handleCopy() {
+    onCopy();
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1200);
+  }
+
+  const isWriting = block.type === "writing";
+
   return (
     <div className="rounded-2xl bg-zinc-950 p-5 ring-1 ring-zinc-800">
-      <div className="flex items-center justify-between">
+      <div className="flex items-start justify-between gap-3">
         <div className="flex items-center gap-2">
           <TypeBadge type={block.type} />
           <span className="text-xs text-zinc-500">Block {index + 1}</span>
         </div>
-        <div className="flex items-center gap-0.5">
-          <IconBtn
-            label="Move up"
-            disabled={index === 0}
-            onClick={() => onMove(-1)}
+        <div className="flex flex-col items-end gap-1.5">
+          <button
+            type="button"
+            onClick={handleCopy}
+            title="Copy block — paste it here or in another lesson"
+            className={
+              "inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium transition " +
+              (copied
+                ? "bg-emerald-500/15 text-emerald-300 ring-1 ring-emerald-500/30"
+                : "text-zinc-400 hover:bg-zinc-900 hover:text-zinc-100")
+            }
           >
-            ↑
-          </IconBtn>
-          <IconBtn
-            label="Move down"
-            disabled={index === total - 1}
-            onClick={() => onMove(1)}
-          >
-            ↓
-          </IconBtn>
-          <IconBtn label="Delete" danger onClick={onRemove}>
-            ×
-          </IconBtn>
+            <svg
+              viewBox="0 0 16 16"
+              className="h-3.5 w-3.5"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.7"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <rect x="4" y="3" width="8" height="10" rx="1.2" />
+              <path d="M6 3v-.5A.5.5 0 0 1 6.5 2h3a.5.5 0 0 1 .5.5V3" />
+            </svg>
+            {copied ? "Copied" : "Copy"}
+          </button>
+          <div className="flex items-center gap-1">
+            {onToggleWriting && (
+              <button
+                type="button"
+                onClick={onToggleWriting}
+                title={
+                  isWriting
+                    ? "Turn back into a multiple-choice question"
+                    : "Turn this into a free-response writing question"
+                }
+                className={
+                  "inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium transition " +
+                  (isWriting
+                    ? "bg-violet-500/15 text-violet-200 ring-1 ring-violet-500/30 hover:bg-violet-500/25"
+                    : "text-zinc-400 hover:bg-zinc-900 hover:text-zinc-100")
+                }
+                aria-pressed={isWriting}
+              >
+                <span
+                  className={
+                    "inline-block h-2 w-2 rounded-full " +
+                    (isWriting ? "bg-violet-300" : "bg-zinc-600")
+                  }
+                />
+                Writing question
+              </button>
+            )}
+            <IconBtn
+              label="Move up"
+              disabled={index === 0}
+              onClick={() => onMove(-1)}
+            >
+              ↑
+            </IconBtn>
+            <IconBtn
+              label="Move down"
+              disabled={index === total - 1}
+              onClick={() => onMove(1)}
+            >
+              ↓
+            </IconBtn>
+            <IconBtn label="Delete" danger onClick={onRemove}>
+              ×
+            </IconBtn>
+          </div>
         </div>
       </div>
 
