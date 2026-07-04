@@ -6,6 +6,7 @@ import { cookies } from "next/headers";
 import bcrypt from "bcryptjs";
 import { dbExec, dbGet, type UserRow } from "./db";
 import { createSession, destroySession, getSession } from "./session";
+import { parseLessonContent } from "./lesson-content";
 
 export type Theme = "light" | "dark";
 const THEME_COOKIE = "scrolls-theme";
@@ -272,19 +273,26 @@ export async function saveLessonAction(
   if (!title) return { error: "Title is required." };
   if (title.length > 200) return { error: "Title is too long." };
 
+  // Validate the JSON shape, then re-stringify through parseLessonContent so
+  // the stored value only contains fields the app knows about (isValidBlock
+  // filters out garbage, and the repetitionSets field survives when
+  // non-empty).
   let content: string;
   try {
-    const parsed: unknown = JSON.parse(contentRaw);
+    const preview = JSON.parse(contentRaw) as unknown;
     if (
-      !parsed ||
-      typeof parsed !== "object" ||
-      !Array.isArray((parsed as { blocks?: unknown }).blocks)
+      !preview ||
+      typeof preview !== "object" ||
+      !Array.isArray((preview as { blocks?: unknown }).blocks)
     ) {
       return { error: "Invalid lesson content." };
     }
-    content = JSON.stringify({
-      blocks: (parsed as { blocks: unknown[] }).blocks,
-    });
+    const parsed = parseLessonContent(contentRaw);
+    content = JSON.stringify(
+      parsed.repetitionSets
+        ? { blocks: parsed.blocks, repetitionSets: parsed.repetitionSets }
+        : { blocks: parsed.blocks },
+    );
   } catch {
     return { error: "Invalid lesson content." };
   }
