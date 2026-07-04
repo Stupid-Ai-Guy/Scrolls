@@ -522,6 +522,8 @@ export default function LessonEditor({
           sets={repetitionSets}
           onChange={setRepetitionSets}
           onClose={() => setRepetitionOpen(false)}
+          clipboard={clipboard}
+          onCopyToClipboard={(b) => setClipboard(b)}
         />
       )}
     </div>
@@ -532,13 +534,24 @@ function RepetitionSetModal({
   sets,
   onChange,
   onClose,
+  clipboard,
+  onCopyToClipboard,
 }: {
   sets: RepetitionSets;
   onChange: (next: RepetitionSets) => void;
   onClose: () => void;
+  clipboard: Block | null;
+  onCopyToClipboard: (b: Block) => void;
 }) {
   const [activeTab, setActiveTab] = useState<"day1" | "day3">("day1");
   const list = sets[activeTab];
+  // Review sets only accept question / writing blocks; paste only if the
+  // shared clipboard has one of those.
+  const pasteable: ReviewBlock | null =
+    clipboard &&
+    (clipboard.type === "question" || clipboard.type === "writing")
+      ? (clipboard as ReviewBlock)
+      : null;
 
   function addReview(kind: "question" | "writing") {
     const fresh: ReviewBlock =
@@ -548,11 +561,26 @@ function RepetitionSetModal({
     onChange({ ...sets, [activeTab]: [...list, fresh] });
   }
 
+  function pasteReview() {
+    if (!pasteable) return;
+    // Deep-clone the clipboard entry so subsequent edits don't mutate the
+    // stored value in-place (localStorage keeps a JSON copy, but the
+    // in-memory clipboard is the same object reference otherwise).
+    const clone = JSON.parse(JSON.stringify(pasteable)) as ReviewBlock;
+    onChange({ ...sets, [activeTab]: [...list, clone] });
+  }
+
   function updateReview(i: number, patch: Partial<ReviewBlock>) {
     const next = list.map((q, j) =>
       j === i ? ({ ...q, ...patch } as ReviewBlock) : q,
     );
     onChange({ ...sets, [activeTab]: next });
+  }
+
+  function copyReview(i: number) {
+    const item = list[i];
+    if (!item) return;
+    onCopyToClipboard(item as Block);
   }
 
   function removeReview(i: number) {
@@ -654,7 +682,7 @@ function RepetitionSetModal({
                 Add multiple-choice or free-response questions students will
                 see on this review.
               </p>
-              <div className="mt-4 flex items-center justify-center gap-2">
+              <div className="mt-4 flex flex-wrap items-center justify-center gap-2">
                 <button
                   type="button"
                   onClick={() => addReview("question")}
@@ -669,6 +697,15 @@ function RepetitionSetModal({
                 >
                   + Writing
                 </button>
+                {pasteable && (
+                  <button
+                    type="button"
+                    onClick={pasteReview}
+                    className="rounded-lg bg-cyan-500/10 px-3 py-1.5 text-sm font-semibold text-cyan-300 ring-1 ring-cyan-500/40 transition hover:bg-cyan-500/20"
+                  >
+                    + Paste ({pasteable.type})
+                  </button>
+                )}
               </div>
             </div>
           ) : (
@@ -686,6 +723,7 @@ function RepetitionSetModal({
                       </p>
                     </div>
                     <div className="flex items-center gap-1">
+                      <ReviewCopyButton onCopy={() => copyReview(i)} />
                       <IconBtn
                         label="Move up"
                         onClick={() => moveReview(i, -1)}
@@ -726,7 +764,12 @@ function RepetitionSetModal({
           )}
 
           {list.length > 0 && (
-            <div className="mt-4 grid grid-cols-2 gap-2">
+            <div
+              className={
+                "mt-4 grid gap-2 " +
+                (pasteable ? "grid-cols-3" : "grid-cols-2")
+              }
+            >
               <button
                 type="button"
                 onClick={() => addReview("question")}
@@ -741,6 +784,15 @@ function RepetitionSetModal({
               >
                 + Writing
               </button>
+              {pasteable && (
+                <button
+                  type="button"
+                  onClick={pasteReview}
+                  className="rounded-lg border border-dashed border-cyan-500/40 px-4 py-3 text-sm font-medium text-cyan-300 transition hover:border-cyan-400/60 hover:bg-cyan-500/5"
+                >
+                  + Paste ({pasteable.type})
+                </button>
+              )}
             </div>
           )}
         </div>
@@ -756,6 +808,55 @@ function RepetitionSetModal({
         </div>
       </div>
     </div>
+  );
+}
+
+function ReviewCopyButton({ onCopy }: { onCopy: () => void }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <button
+      type="button"
+      onClick={() => {
+        onCopy();
+        setCopied(true);
+        setTimeout(() => setCopied(false), 1200);
+      }}
+      title="Copy to clipboard — paste in another set or in the main lesson"
+      aria-label="Copy"
+      className={
+        "flex h-8 w-8 items-center justify-center rounded-md text-base transition " +
+        (copied
+          ? "bg-emerald-500/15 text-emerald-300"
+          : "text-zinc-500 hover:bg-zinc-800 hover:text-zinc-200")
+      }
+    >
+      {copied ? (
+        <svg
+          viewBox="0 0 16 16"
+          className="h-3.5 w-3.5"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2.2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        >
+          <path d="M3 8.5l3 3 7-7" />
+        </svg>
+      ) : (
+        <svg
+          viewBox="0 0 16 16"
+          className="h-3.5 w-3.5"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.6"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        >
+          <rect x="4" y="3" width="8" height="10" rx="1.2" />
+          <path d="M6 3v-.5A.5.5 0 0 1 6.5 2h3a.5.5 0 0 1 .5.5V3" />
+        </svg>
+      )}
+    </button>
   );
 }
 
