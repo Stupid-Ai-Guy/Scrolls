@@ -3124,18 +3124,41 @@ function CodeShape({
 
   // Editing state is local; we only push the source up to the shape on a
   // small debounce so each keystroke doesn't ripple through the whole scene.
-  const [localSource, setLocalSource] = useState(s.source);
+  const [localSource, setLocalSource] = useState(s.source ?? "");
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pendingRef = useRef<string | null>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
-  useEffect(() => setLocalSource(s.source), [s.source]);
+  useEffect(() => setLocalSource(s.source ?? ""), [s.source]);
   useEffect(
     () => () => {
       if (timerRef.current) clearTimeout(timerRef.current);
     },
     [],
   );
+
+  // Sync the canvas backing store to its CSS pixel size × devicePixelRatio.
+  // A <canvas> defaults to 300×150; without this the drawing surface is
+  // stretched via CSS and looks tiny / blurry. Runs on mount and on every
+  // resize (drag the box handles → canvas stays sharp).
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const resize = () => {
+      const dpr = window.devicePixelRatio || 1;
+      const cssW = canvas.clientWidth;
+      const cssH = canvas.clientHeight;
+      if (cssW <= 0 || cssH <= 0) return;
+      canvas.width = Math.floor(cssW * dpr);
+      canvas.height = Math.floor(cssH * dpr);
+      const ctx = canvas.getContext("2d");
+      if (ctx) ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    };
+    resize();
+    const ro = new ResizeObserver(resize);
+    ro.observe(canvas);
+    return () => ro.disconnect();
+  }, []);
 
   const handleSourceChange = (v: string) => {
     setLocalSource(v);
