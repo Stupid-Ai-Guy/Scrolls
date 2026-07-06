@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
 import katex from "katex";
 import { ComputeEngine } from "@cortex-js/compute-engine";
 import CodeMirror from "@uiw/react-codemirror";
@@ -1103,7 +1103,13 @@ function SceneCanvas({
 
   const viewIsDefault = view.zoom === 1 && view.panX === 0 && view.panY === 0;
 
+  // Per-SceneCanvas output-canvas registry. A stable ref instance so
+  // OutputShape and CodeShape descendants share it, but two different
+  // SceneCanvas instances (edit view + live preview) don't collide.
+  const outputRegistryRef = useRef<OutputRegistry>(new Map());
+
   return (
+   <OutputRegistryCtx.Provider value={outputRegistryRef.current}>
     <div ref={containerRef} className="relative overflow-hidden">
       {editable && !viewIsDefault && (
         <button
@@ -1316,6 +1322,7 @@ function SceneCanvas({
           })()}
       </svg>
     </div>
+   </OutputRegistryCtx.Provider>
   );
 }
 
@@ -3131,11 +3138,17 @@ function FlyoutItem({
 
 // ---------------- JS code shape ----------------
 
-// Live registry mapping output-shape id → its canvas element. OutputShape
-// registers on mount; CodeShape's Run picks the first entry to draw into.
-// Module-scope so both components share it without threading refs through
-// props / context.
-const outputCanvases = new Map<string, HTMLCanvasElement>();
+// Registry mapping output-shape id → its canvas element. OutputShape
+// registers on mount; CodeShape's Run picks an entry to draw into. Scoped
+// to each SceneCanvas via React context so multiple SceneCanvas instances
+// (e.g. the InteractiveEditor renders both a VisualSceneEditor and a
+// SceneRunner over the same scene) don't clobber each other's canvases in
+// a single module-level map.
+type OutputRegistry = Map<string, HTMLCanvasElement>;
+const OutputRegistryCtx = createContext<OutputRegistry | null>(null);
+function useOutputRegistry(): OutputRegistry | null {
+  return useContext(OutputRegistryCtx);
+}
 
 function formatJsValue(v: unknown): string {
   if (v === undefined) return "undefined";
@@ -3262,6 +3275,7 @@ function CodeShape({
     wy: number,
   ) => void;
 }) {
+  const outputRegistry = useOutputRegistry();
   const w = s.w ?? 10;
   const h = s.h ?? 8;
   const left = toX(s.x - w / 2);
@@ -3331,7 +3345,14 @@ function CodeShape({
     const spawnWx = s.x + (s.w ?? 10) / 2 + outputDefaultW / 2 + 1;
     const spawnWy = s.y;
 
-    const firstEntry = outputCanvases.entries().next().value as
+    if (!outputRegistry) {
+      onUpdate?.(s.id, {
+        source: localSource,
+        error: "This scene isn't rendering an output registry.",
+      });
+      return;
+    }
+    const firstEntry = outputRegistry.entries().next().value as
       | [string, HTMLCanvasElement]
       | undefined;
 
@@ -3360,11 +3381,11 @@ function CodeShape({
       return;
     }
     // No Output yet — create one adjacent, then draw once the OutputShape's
-    // useEffect has registered the canvas in the outputCanvases map.
+    // useEffect has registered the canvas in the per-SceneCanvas registry.
     onPlaceShape("output", spawnWx, spawnWy);
     requestAnimationFrame(() => {
       setTimeout(() => {
-        const next = outputCanvases.values().next().value as
+        const next = outputRegistry.values().next().value as
           | HTMLCanvasElement
           | undefined;
         if (!next) {
@@ -3542,6 +3563,7 @@ function OutputShape({
     style?: React.CSSProperties;
   };
 }) {
+  const outputRegistry = useOutputRegistry();
   const w = s.w ?? 10;
   const h = s.h ?? 8;
   const left = toX(s.x - w / 2);
@@ -3554,16 +3576,18 @@ function OutputShape({
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const headerH = 24;
 
-  // Register this canvas so CodeShape's Run can find it. Cleanup removes it
-  // when the shape unmounts (or its id changes, though ids are stable).
+  // Register this canvas in the SceneCanvas-scoped registry so CodeShape's
+  // Run can find it. Cleanup removes on unmount. Each SceneCanvas instance
+  // has its own registry (via context), so the editor and a preview
+  // rendering the same scene each own their own canvas.
   useEffect(() => {
     const canvas = canvasRef.current;
-    if (!canvas) return;
-    outputCanvases.set(s.id, canvas);
+    if (!canvas || !outputRegistry) return;
+    outputRegistry.set(s.id, canvas);
     return () => {
-      outputCanvases.delete(s.id);
+      outputRegistry.delete(s.id);
     };
-  }, [s.id]);
+  }, [s.id, outputRegistry]);
 
   // Keep the canvas backing store synced with CSS size × devicePixelRatio
   // (same reason as any HiDPI-aware canvas — 300×150 default otherwise).
