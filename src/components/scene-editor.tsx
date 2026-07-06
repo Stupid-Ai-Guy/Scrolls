@@ -256,8 +256,9 @@ function makeShape(kind: SceneShape["kind"], wx: number, wy: number): SceneShape
         w: 10,
         h: 8,
         source:
-          "// `ctx` is a CanvasRenderingContext2D, `width` and `height` are\n" +
-          "// the canvas size in CSS pixels. Draw with the standard API.\n" +
+          "// Drop an Output shape on the canvas, then press Run.\n" +
+          "// `ctx` is a CanvasRenderingContext2D; `width` and `height` are\n" +
+          "// the Output box's size in CSS pixels.\n" +
           "\n" +
           "ctx.fillStyle = '#22d3ee';\n" +
           "ctx.fillRect(20, 20, 80, 50);\n" +
@@ -268,6 +269,16 @@ function makeShape(kind: SceneShape["kind"], wx: number, wy: number): SceneShape
           "ctx.arc(width / 2, height / 2, 30, 0, Math.PI * 2);\n" +
           "ctx.stroke();\n",
         color: "amber",
+      };
+    case "output":
+      return {
+        id,
+        kind,
+        x: round(wx),
+        y: round(wy),
+        w: 10,
+        h: 8,
+        color: "emerald",
       };
   }
 }
@@ -434,6 +445,26 @@ function JsIcon() {
   );
 }
 
+function OutputIcon() {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      className="h-5 w-5"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      {/* small display/monitor with a mark inside */}
+      <rect x="3" y="4" width="18" height="13" rx="2" />
+      <path d="M8 21h8" />
+      <path d="M12 17v4" />
+      <path d="M7.5 11.5l2.5 2 3.5-4.5 3.5 4.5" opacity="0.7" />
+    </svg>
+  );
+}
+
 function ButtonIcon() {
   return (
     <svg
@@ -570,7 +601,7 @@ type RendererProps = {
 function shapeTopAnchor(s: SceneShape): { x: number; y: number } {
   if (s.kind === "point" || s.kind === "text" || s.kind === "latex")
     return { x: s.x, y: s.y };
-  if (s.kind === "function" || s.kind === "code") {
+  if (s.kind === "function" || s.kind === "code" || s.kind === "output") {
     const h = s.h ?? (s.kind === "function" ? 6 : 8);
     return { x: s.x, y: s.y + h / 2 };
   }
@@ -594,7 +625,7 @@ function shapeBBox(s: SceneShape): {
   if (s.kind === "point" || s.kind === "text" || s.kind === "latex") {
     return { minX: s.x, minY: s.y, maxX: s.x, maxY: s.y };
   }
-  if (s.kind === "function" || s.kind === "code") {
+  if (s.kind === "function" || s.kind === "code" || s.kind === "output") {
     const defaultW = s.kind === "function" ? 8 : 10;
     const defaultH = s.kind === "function" ? 6 : 8;
     const w = s.w ?? defaultW;
@@ -1293,7 +1324,8 @@ function movePatch(s: SceneShape, dxw: number, dyw: number): Partial<SceneShape>
     s.kind === "text" ||
     s.kind === "latex" ||
     s.kind === "function" ||
-    s.kind === "code"
+    s.kind === "code" ||
+    s.kind === "output"
   ) {
     return { x: round(s.x + dxw), y: round(s.y + dyw) };
   }
@@ -1344,13 +1376,15 @@ function resizePatch(
     s.kind === "rect" ||
     s.kind === "button" ||
     s.kind === "function" ||
-    s.kind === "code"
+    s.kind === "code" ||
+    s.kind === "output"
   ) {
-    // function/code use (x,y) for the box center; rect/button use (cx,cy).
-    // Normalize while computing, then write back to the correct field names.
-    const xyShape = s.kind === "function" || s.kind === "code";
-    const defaultW = s.kind === "function" ? 8 : s.kind === "code" ? 10 : 8;
-    const defaultH = s.kind === "function" ? 6 : s.kind === "code" ? 8 : 6;
+    // function/code/output use (x,y) for the box center; rect/button use
+    // (cx,cy). Normalize while computing, then write back to the right names.
+    const xyShape =
+      s.kind === "function" || s.kind === "code" || s.kind === "output";
+    const defaultW = s.kind === "function" ? 8 : 10;
+    const defaultH = s.kind === "function" ? 6 : 8;
     const cx = xyShape ? s.x : s.cx;
     const cy = xyShape ? s.y : s.cy;
     const w0 = xyShape ? s.w ?? defaultW : s.w;
@@ -1468,13 +1502,15 @@ function renderHandles(
     s.kind === "rect" ||
     s.kind === "button" ||
     s.kind === "function" ||
-    s.kind === "code"
+    s.kind === "code" ||
+    s.kind === "output"
   ) {
-    const xyShape = s.kind === "function" || s.kind === "code";
+    const xyShape =
+      s.kind === "function" || s.kind === "code" || s.kind === "output";
     const cx = xyShape ? s.x : s.cx;
     const cy = xyShape ? s.y : s.cy;
-    const defaultW = s.kind === "function" ? 8 : s.kind === "code" ? 10 : 8;
-    const defaultH = s.kind === "function" ? 6 : s.kind === "code" ? 8 : 6;
+    const defaultW = s.kind === "function" ? 8 : 10;
+    const defaultH = s.kind === "function" ? 6 : 8;
     const w = xyShape ? s.w ?? defaultW : s.w;
     const h = xyShape ? s.h ?? defaultH : s.h;
     const left = cx - w / 2;
@@ -1739,6 +1775,19 @@ function renderShape(
         color={color}
         interact={interact}
         onUpdate={ctx.onUpdate}
+      />
+    );
+  }
+  if (s.kind === "output") {
+    return (
+      <OutputShape
+        key={s.id}
+        s={s}
+        toX={toX}
+        toY={toY}
+        isSelected={isSelected}
+        color={color}
+        interact={interact}
       />
     );
   }
@@ -2319,7 +2368,8 @@ export function SceneEditor({
       shape.kind === "text" ||
       shape.kind === "latex" ||
       shape.kind === "function" ||
-      shape.kind === "code"
+      shape.kind === "code" ||
+      shape.kind === "output"
     ) {
       return {
         ...shape,
@@ -2730,6 +2780,7 @@ const TOOL_COLORS = {
   latex: { idle: "text-violet-300", active: "bg-violet-500/15 text-violet-200" },
   function: { idle: "text-cyan-300", active: "bg-cyan-500/15 text-cyan-200" },
   code: { idle: "text-emerald-300", active: "bg-emerald-500/15 text-emerald-200" },
+  output: { idle: "text-sky-300", active: "bg-sky-500/15 text-sky-200" },
   button: { idle: "text-amber-300", active: "bg-amber-500/15 text-amber-200" },
   viewport: { idle: "text-amber-300", active: "bg-amber-500/15 text-amber-200" },
   canvas: { idle: "text-zinc-400", active: "bg-zinc-700/40 text-zinc-100" },
@@ -2967,6 +3018,15 @@ function Sidebar({
       </ToolButton>
 
       <ToolButton
+        label="Output — canvas surface a JS block draws into"
+        active={activeTool === "output"}
+        tone={TOOL_COLORS.output}
+        onClick={() => onSelectTool("output")}
+      >
+        <OutputIcon />
+      </ToolButton>
+
+      <ToolButton
         label="Viewport — drag a rect to set the preview frame"
         active={activeTool === "viewport"}
         tone={TOOL_COLORS.viewport}
@@ -3064,6 +3124,12 @@ function FlyoutItem({
 
 // ---------------- JS code shape ----------------
 
+// Live registry mapping output-shape id → its canvas element. OutputShape
+// registers on mount; CodeShape's Run picks the first entry to draw into.
+// Module-scope so both components share it without threading refs through
+// props / context.
+const outputCanvases = new Map<string, HTMLCanvasElement>();
+
 function runJsOnCanvas(
   source: string,
   ctx: CanvasRenderingContext2D,
@@ -3127,7 +3193,6 @@ function CodeShape({
   const [localSource, setLocalSource] = useState(s.source ?? "");
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pendingRef = useRef<string | null>(null);
-  const canvasRef = useRef<HTMLCanvasElement>(null);
 
   useEffect(() => setLocalSource(s.source ?? ""), [s.source]);
   useEffect(
@@ -3136,29 +3201,6 @@ function CodeShape({
     },
     [],
   );
-
-  // Sync the canvas backing store to its CSS pixel size × devicePixelRatio.
-  // A <canvas> defaults to 300×150; without this the drawing surface is
-  // stretched via CSS and looks tiny / blurry. Runs on mount and on every
-  // resize (drag the box handles → canvas stays sharp).
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const resize = () => {
-      const dpr = window.devicePixelRatio || 1;
-      const cssW = canvas.clientWidth;
-      const cssH = canvas.clientHeight;
-      if (cssW <= 0 || cssH <= 0) return;
-      canvas.width = Math.floor(cssW * dpr);
-      canvas.height = Math.floor(cssH * dpr);
-      const ctx = canvas.getContext("2d");
-      if (ctx) ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    };
-    resize();
-    const ro = new ResizeObserver(resize);
-    ro.observe(canvas);
-    return () => ro.disconnect();
-  }, []);
 
   const handleSourceChange = (v: string) => {
     setLocalSource(v);
@@ -3178,21 +3220,32 @@ function CodeShape({
       timerRef.current = null;
       pendingRef.current = null;
     }
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return;
-    // Match the backing-store resolution to the CSS size × devicePixelRatio
-    // so canvas drawing stays crisp on HiDPI displays. The user code still
-    // works in CSS pixels because we apply a matching transform.
-    const dpr = window.devicePixelRatio || 1;
-    const cssW = canvas.clientWidth;
-    const cssH = canvas.clientHeight;
-    canvas.width = Math.max(1, Math.floor(cssW * dpr));
-    canvas.height = Math.max(1, Math.floor(cssH * dpr));
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    // Draw to the first output shape in the scene. Its OutputShape component
+    // registered its canvas in the module-scope outputCanvases map on mount.
+    const first = outputCanvases.values().next().value as
+      | HTMLCanvasElement
+      | undefined;
+    if (!first) {
+      onUpdate?.(s.id, {
+        source: localSource,
+        error: "No Output block in this scene — drop one from the sidebar.",
+      });
+      return;
+    }
+    const ctx = first.getContext("2d");
+    if (!ctx) {
+      onUpdate?.(s.id, {
+        source: localSource,
+        error: "Couldn't get a 2D context on the Output canvas.",
+      });
+      return;
+    }
+    // The OutputShape's own ResizeObserver keeps width/height in sync; just
+    // clear and run in CSS pixels.
+    const cssW = first.clientWidth;
+    const cssH = first.clientHeight;
     ctx.clearRect(0, 0, cssW, cssH);
-    const result = runJsOnCanvas(localSource, ctx, canvas);
+    const result = runJsOnCanvas(localSource, ctx, first);
     onUpdate?.(s.id, {
       source: localSource,
       error: result.ok ? undefined : result.error ?? undefined,
@@ -3233,8 +3286,6 @@ function CodeShape({
             color: "#e4e4e7",
           }}
         >
-          {/* Header — draggable area. No stopPropagation so mousedowns
-              bubble up to the parent <g>'s interact handlers. */}
           <div
             style={{
               height: headerH,
@@ -3273,14 +3324,14 @@ function CodeShape({
               Run
             </button>
           </div>
-          {/* Editor — stopPropagation so typing / selection inside doesn't
-              start a shape drag. Top half of the body. */}
+          {/* Editor takes the whole body now — the canvas moved out to its
+              own Output shape. */}
           <div
             onMouseDown={stopDrag}
             onMouseMove={stopDrag}
             onClick={stopDrag}
             style={{
-              flex: "1 1 55%",
+              flex: "1 1 auto",
               overflow: "auto",
               minHeight: 0,
             }}
@@ -3304,21 +3355,6 @@ function CodeShape({
               style={{ height: "100%", fontSize: 13 }}
             />
           </div>
-          {/* Canvas — bottom half. User code draws here via ctx. */}
-          <canvas
-            ref={canvasRef}
-            onMouseDown={stopDrag}
-            onMouseMove={stopDrag}
-            onClick={stopDrag}
-            style={{
-              flex: "1 1 45%",
-              minHeight: 0,
-              width: "100%",
-              background: "#0a0a0c",
-              borderTop: "1px solid #3f3f46",
-              display: "block",
-            }}
-          />
           {errorH > 0 && (
             <div
               onMouseDown={stopDrag}
@@ -3339,6 +3375,152 @@ function CodeShape({
               {s.error}
             </div>
           )}
+        </div>
+      </foreignObject>
+      {isSelected && (
+        <rect
+          x={left}
+          y={top}
+          width={boxW}
+          height={boxH}
+          fill="none"
+          stroke="#22d3ee"
+          strokeWidth="2"
+          strokeDasharray="4 2"
+          rx="6"
+          ry="6"
+          pointerEvents="none"
+        />
+      )}
+    </g>
+  );
+}
+
+function OutputShape({
+  s,
+  toX,
+  toY,
+  isSelected,
+  color,
+  interact,
+}: {
+  s: SceneShape & { kind: "output" };
+  toX: (wx: number) => number;
+  toY: (wy: number) => number;
+  isSelected: boolean;
+  color: string;
+  interact: {
+    onMouseDown?: (e: React.MouseEvent<SVGGElement>) => void;
+    onContextMenu?: (e: React.MouseEvent<SVGGElement>) => void;
+    style?: React.CSSProperties;
+  };
+}) {
+  const w = s.w ?? 10;
+  const h = s.h ?? 8;
+  const left = toX(s.x - w / 2);
+  const right = toX(s.x + w / 2);
+  const top = toY(s.y + h / 2);
+  const bottom = toY(s.y - h / 2);
+  const boxW = right - left;
+  const boxH = bottom - top;
+
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const headerH = 24;
+
+  // Register this canvas so CodeShape's Run can find it. Cleanup removes it
+  // when the shape unmounts (or its id changes, though ids are stable).
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    outputCanvases.set(s.id, canvas);
+    return () => {
+      outputCanvases.delete(s.id);
+    };
+  }, [s.id]);
+
+  // Keep the canvas backing store synced with CSS size × devicePixelRatio
+  // (same reason as any HiDPI-aware canvas — 300×150 default otherwise).
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const resize = () => {
+      const dpr = window.devicePixelRatio || 1;
+      const cssW = canvas.clientWidth;
+      const cssH = canvas.clientHeight;
+      if (cssW <= 0 || cssH <= 0) return;
+      canvas.width = Math.floor(cssW * dpr);
+      canvas.height = Math.floor(cssH * dpr);
+      const ctx = canvas.getContext("2d");
+      if (ctx) ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    };
+    resize();
+    const ro = new ResizeObserver(resize);
+    ro.observe(canvas);
+    return () => ro.disconnect();
+  }, []);
+
+  const stopDrag = (e: React.MouseEvent) => e.stopPropagation();
+
+  return (
+    <g key={s.id} {...interact}>
+      <rect
+        x={left}
+        y={top}
+        width={boxW}
+        height={boxH}
+        fill="#0a0a0c"
+        stroke={color}
+        strokeOpacity="0.55"
+        strokeWidth="1.5"
+        rx="6"
+        ry="6"
+      />
+      <foreignObject x={left} y={top} width={boxW} height={boxH}>
+        <div
+          style={{
+            width: "100%",
+            height: "100%",
+            display: "flex",
+            flexDirection: "column",
+            overflow: "hidden",
+            borderRadius: 6,
+            fontFamily:
+              "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace",
+            color: "#e4e4e7",
+          }}
+        >
+          <div
+            style={{
+              height: headerH,
+              flex: "0 0 auto",
+              display: "flex",
+              alignItems: "center",
+              padding: "0 10px",
+              background: "#0f172a",
+              borderBottom: "1px solid #1e293b",
+              cursor: interact.style?.cursor ?? "default",
+              userSelect: "none",
+              fontSize: 11,
+              color: "#7dd3fc",
+              letterSpacing: "0.04em",
+              fontWeight: 600,
+            }}
+          >
+            Output
+          </div>
+          <canvas
+            ref={canvasRef}
+            onMouseDown={stopDrag}
+            onMouseMove={stopDrag}
+            onClick={stopDrag}
+            style={{
+              flex: "1 1 auto",
+              minHeight: 0,
+              width: "100%",
+              background: "#0a0a0c",
+              display: "block",
+            }}
+          />
         </div>
       </foreignObject>
       {isSelected && (

@@ -135,6 +135,17 @@ export type SceneShape =
       source: string;
       color: string;
       error?: string;
+    }
+  | {
+      // Canvas surface a code shape draws into. Kept separate so authors can
+      // move / resize the code editor and the output area independently.
+      id: string;
+      kind: "output";
+      x: number;
+      y: number;
+      w?: number;
+      h?: number;
+      color: string;
     };
 
 export type Scene = {
