@@ -3137,24 +3137,97 @@ function FlyoutItem({
 // props / context.
 const outputCanvases = new Map<string, HTMLCanvasElement>();
 
+function formatJsValue(v: unknown): string {
+  if (v === undefined) return "undefined";
+  if (v === null) return "null";
+  if (typeof v === "string") return v;
+  if (typeof v === "number" || typeof v === "boolean") return String(v);
+  if (typeof v === "function") return `[Function ${v.name || "anonymous"}]`;
+  try {
+    return JSON.stringify(v);
+  } catch {
+    return String(v);
+  }
+}
+
+function paintConsoleLog(
+  ctx: CanvasRenderingContext2D,
+  lines: string[],
+  cssW: number,
+): void {
+  if (lines.length === 0) return;
+  ctx.save();
+  ctx.font =
+    '14px ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace';
+  ctx.textBaseline = "top";
+  ctx.textAlign = "left";
+  const lineH = 18;
+  const pad = 10;
+  const boxH = lines.length * lineH + pad * 2;
+  // Dark scrim so text stays readable when the user also drew shapes.
+  ctx.fillStyle = "rgba(24, 24, 27, 0.85)";
+  ctx.fillRect(0, 0, cssW, boxH);
+  ctx.fillStyle = "#e4e4e7";
+  for (let i = 0; i < lines.length; i++) {
+    ctx.fillText(lines[i], pad, pad + i * lineH);
+  }
+  ctx.restore();
+}
+
 function runJsOnCanvas(
   source: string,
   ctx: CanvasRenderingContext2D,
   canvas: HTMLCanvasElement,
 ): { ok: boolean; error: string | null } {
+  // Capture console.log/warn/error/info so plain JS like console.log("hi")
+  // renders on the canvas as text — no ctx calls required. We still
+  // forward to the real console so devtools shows the same lines.
+  const logs: string[] = [];
+  const realConsole = (globalThis as { console: Console }).console;
+  const consoleStub = {
+    log: (...args: unknown[]) => {
+      logs.push(args.map(formatJsValue).join(" "));
+      realConsole.log(...args);
+    },
+    info: (...args: unknown[]) => {
+      logs.push(args.map(formatJsValue).join(" "));
+      realConsole.info(...args);
+    },
+    warn: (...args: unknown[]) => {
+      logs.push("Warn: " + args.map(formatJsValue).join(" "));
+      realConsole.warn(...args);
+    },
+    error: (...args: unknown[]) => {
+      logs.push("Error: " + args.map(formatJsValue).join(" "));
+      realConsole.error(...args);
+    },
+  };
   try {
-    // ctx, canvas, width, height are the entire surface exposed to user
-    // code. console.log goes through the browser console as usual.
+    // Expose ctx / canvas / width / height for canvas-first authors, plus
+    // the stubbed console for console-first authors. If the source
+    // `return`s a value, it also lands in the log strip.
     const fn = new Function(
       "ctx",
       "canvas",
       "width",
       "height",
+      "console",
       `"use strict";\n${source}`,
     );
-    fn(ctx, canvas, canvas.clientWidth, canvas.clientHeight);
+    const result = fn(
+      ctx,
+      canvas,
+      canvas.clientWidth,
+      canvas.clientHeight,
+      consoleStub,
+    );
+    if (result !== undefined) logs.push("→ " + formatJsValue(result));
+    paintConsoleLog(ctx, logs, canvas.clientWidth);
     return { ok: true, error: null };
   } catch (e) {
+    // If the source drew some ctx state before throwing, still show any
+    // console output captured up to that point.
+    paintConsoleLog(ctx, logs, canvas.clientWidth);
     return {
       ok: false,
       error: e instanceof Error ? `${e.name}: ${e.message}` : String(e),
