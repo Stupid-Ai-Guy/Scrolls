@@ -2338,9 +2338,13 @@ export function SceneEditor({
   }
 
   function updateShape(id: string, patch: Partial<SceneShape>) {
+    // Read from sceneRef instead of the render-time `scene` so async callers
+    // (e.g. CodeShape's rAF/setTimeout after auto-summoning an Output) see
+    // the latest shapes list, not a stale pre-onPlaceShape snapshot.
+    const current = sceneRef.current;
     onChange({
-      ...scene,
-      shapes: scene.shapes.map((s) =>
+      ...current,
+      shapes: current.shapes.map((s) =>
         s.id === id ? ({ ...s, ...patch } as SceneShape) : s,
       ),
     });
@@ -2348,9 +2352,10 @@ export function SceneEditor({
 
   function updateShapes(updates: { id: string; patch: Partial<SceneShape> }[]) {
     const map = new Map(updates.map((u) => [u.id, u.patch]));
+    const current = sceneRef.current;
     onChange({
-      ...scene,
-      shapes: scene.shapes.map((s) => {
+      ...current,
+      shapes: current.shapes.map((s) => {
         const p = map.get(s.id);
         return p ? ({ ...s, ...p } as SceneShape) : s;
       }),
@@ -2369,7 +2374,8 @@ export function SceneEditor({
   function placeShape(kind: SceneShape["kind"], wx: number, wy: number) {
     snapshot();
     const s = makeShape(kind, wx, wy);
-    onChange({ ...scene, shapes: [...scene.shapes, s] });
+    const current = sceneRef.current;
+    onChange({ ...current, shapes: [...current.shapes, s] });
     setSelectedIds([s.id]);
     setActiveTool("select");
   }
