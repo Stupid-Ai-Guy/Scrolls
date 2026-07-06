@@ -256,18 +256,16 @@ function makeShape(kind: SceneShape["kind"], wx: number, wy: number): SceneShape
         w: 10,
         h: 8,
         source:
-          "// Drop an Output shape on the canvas, then press Run.\n" +
-          "// `ctx` is a CanvasRenderingContext2D; `width` and `height` are\n" +
-          "// the Output box's size in CSS pixels.\n" +
+          "// Press Run — an Output box opens next to this one and your\n" +
+          "// code runs inside a sandboxed iframe. `document.body` is that\n" +
+          "// iframe's body, so anything you append shows up in the Output.\n" +
           "\n" +
-          "ctx.fillStyle = '#22d3ee';\n" +
-          "ctx.fillRect(20, 20, 80, 50);\n" +
+          "const h = document.createElement('h2');\n" +
+          "h.textContent = 'Hello, Scrolls';\n" +
+          "h.style.color = '#22d3ee';\n" +
+          "document.body.appendChild(h);\n" +
           "\n" +
-          "ctx.strokeStyle = '#f59e0b';\n" +
-          "ctx.lineWidth = 3;\n" +
-          "ctx.beginPath();\n" +
-          "ctx.arc(width / 2, height / 2, 30, 0, Math.PI * 2);\n" +
-          "ctx.stroke();\n",
+          "console.log('2 + 3 =', 2 + 3);\n",
         color: "amber",
       };
     case "output":
@@ -3138,17 +3136,24 @@ function FlyoutItem({
 
 // ---------------- JS code shape ----------------
 
-// Registry mapping output-shape id → its canvas element. OutputShape
-// registers on mount; CodeShape's Run picks an entry to draw into. Scoped
-// to each SceneCanvas via React context so multiple SceneCanvas instances
-// (e.g. the InteractiveEditor renders both a VisualSceneEditor and a
-// SceneRunner over the same scene) don't clobber each other's canvases in
-// a single module-level map.
-type OutputRegistry = Map<string, HTMLCanvasElement>;
+// Registry mapping output-shape id → its iframe element. OutputShape
+// registers on mount; CodeShape's Run injects user JS into the iframe so
+// the user code sees `document.body` = the iframe body, not the app's real
+// body. Scoped per SceneCanvas via React context so multiple instances
+// (edit view + live preview over the same scene) don't collide.
+type OutputRegistry = Map<string, HTMLIFrameElement>;
 const OutputRegistryCtx = createContext<OutputRegistry | null>(null);
 function useOutputRegistry(): OutputRegistry | null {
   return useContext(OutputRegistryCtx);
 }
+
+// srcdoc for the Output iframe. A dark, monospace-styled body so DOM
+// content the user appends looks reasonable by default.
+const OUTPUT_IFRAME_SRC = `<!DOCTYPE html><html><head><style>
+  html,body{margin:0;padding:0;height:100%;width:100%;box-sizing:border-box;}
+  body{background:#0a0a0c;color:#e4e4e7;padding:10px;overflow:auto;
+       font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:13px;}
+</style></head><body></body></html>`;
 
 function formatJsValue(v: unknown): string {
   if (v === undefined) return "undefined";
@@ -3163,89 +3168,84 @@ function formatJsValue(v: unknown): string {
   }
 }
 
-function paintConsoleLog(
-  ctx: CanvasRenderingContext2D,
-  lines: string[],
-  cssW: number,
-): void {
-  if (lines.length === 0) return;
-  ctx.save();
-  ctx.font =
-    '14px ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace';
-  ctx.textBaseline = "top";
-  ctx.textAlign = "left";
-  const lineH = 18;
-  const pad = 10;
-  const boxH = lines.length * lineH + pad * 2;
-  // Dark scrim so text stays readable when the user also drew shapes.
-  ctx.fillStyle = "rgba(24, 24, 27, 0.85)";
-  ctx.fillRect(0, 0, cssW, boxH);
-  ctx.fillStyle = "#e4e4e7";
-  for (let i = 0; i < lines.length; i++) {
-    ctx.fillText(lines[i], pad, pad + i * lineH);
-  }
-  ctx.restore();
-}
-
-function runJsOnCanvas(
+// Run user JS inside a sandboxed iframe. `document`, `document.body`,
+// `window`, `console` etc. all resolve to the iframe context — appending
+// DOM ends up in the Output box, not the real page body. Handles both
+// "just run it" DOM code and canvas code (author creates the canvas
+// inside `document.body`).
+function runInIframe(
+  iframe: HTMLIFrameElement,
   source: string,
-  ctx: CanvasRenderingContext2D,
-  canvas: HTMLCanvasElement,
 ): { ok: boolean; error: string | null } {
-  // Capture console.log/warn/error/info so plain JS like console.log("hi")
-  // renders on the canvas as text — no ctx calls required. We still
-  // forward to the real console so devtools shows the same lines.
+  const win = iframe.contentWindow;
+  const doc = iframe.contentDocument;
+  if (!win || !doc) return { ok: false, error: "Iframe not ready." };
+
+  // Clear whatever ran before.
+  doc.body.innerHTML = "";
+
+  // Wrap console.log/warn/error/info so calls land in a small header pane
+  // AND still show up in the real devtools console.
   const logs: string[] = [];
-  const realConsole = (globalThis as { console: Console }).console;
-  const consoleStub = {
+  const w = win as unknown as Window & typeof globalThis;
+  const realConsole = w.console;
+  const push = (prefix: string, args: unknown[]) => {
+    logs.push(prefix + args.map(formatJsValue).join(" "));
+  };
+  w.console = {
+    ...realConsole,
     log: (...args: unknown[]) => {
-      logs.push(args.map(formatJsValue).join(" "));
+      push("", args);
       realConsole.log(...args);
     },
     info: (...args: unknown[]) => {
-      logs.push(args.map(formatJsValue).join(" "));
+      push("", args);
       realConsole.info(...args);
     },
     warn: (...args: unknown[]) => {
-      logs.push("Warn: " + args.map(formatJsValue).join(" "));
+      push("⚠ ", args);
       realConsole.warn(...args);
     },
     error: (...args: unknown[]) => {
-      logs.push("Error: " + args.map(formatJsValue).join(" "));
+      push("✖ ", args);
       realConsole.error(...args);
     },
+  } as unknown as Console;
+
+  // Catch runtime errors thrown by the injected script.
+  let runtimeErr: string | null = null;
+  w.onerror = (msg) => {
+    runtimeErr =
+      typeof msg === "string" ? msg : (msg as ErrorEvent).message ?? "Error";
+    return true;
   };
+
+  // Inject and run. Appending a <script> to the iframe body executes it
+  // synchronously in the iframe's context.
   try {
-    // Expose ctx / canvas / width / height for canvas-first authors, plus
-    // the stubbed console for console-first authors. If the source
-    // `return`s a value, it also lands in the log strip.
-    const fn = new Function(
-      "ctx",
-      "canvas",
-      "width",
-      "height",
-      "console",
-      `"use strict";\n${source}`,
-    );
-    const result = fn(
-      ctx,
-      canvas,
-      canvas.clientWidth,
-      canvas.clientHeight,
-      consoleStub,
-    );
-    if (result !== undefined) logs.push("→ " + formatJsValue(result));
-    paintConsoleLog(ctx, logs, canvas.clientWidth);
-    return { ok: true, error: null };
+    const script = doc.createElement("script");
+    script.textContent = `try{${source}}catch(e){window.onerror(e && e.message ? e.message : String(e))}`;
+    doc.body.appendChild(script);
+    // Script tag itself is now in the body — remove it so it doesn't
+    // affect layout.
+    script.remove();
   } catch (e) {
-    // If the source drew some ctx state before throwing, still show any
-    // console output captured up to that point.
-    paintConsoleLog(ctx, logs, canvas.clientWidth);
-    return {
-      ok: false,
-      error: e instanceof Error ? `${e.name}: ${e.message}` : String(e),
-    };
+    runtimeErr = e instanceof Error ? `${e.name}: ${e.message}` : String(e);
   }
+
+  // If any console output was captured, prepend it as a small styled block
+  // so it shows above whatever DOM the user code appended.
+  if (logs.length > 0) {
+    const pre = doc.createElement("pre");
+    pre.textContent = logs.join("\n");
+    pre.style.cssText =
+      "margin:0 0 8px;padding:8px 10px;background:rgba(24,24,27,0.85);" +
+      "color:#e4e4e7;border-radius:4px;font:13px ui-monospace,monospace;" +
+      "white-space:pre-wrap;overflow:auto;";
+    doc.body.insertBefore(pre, doc.body.firstChild);
+  }
+
+  return { ok: runtimeErr === null, error: runtimeErr };
 }
 
 function CodeShape({
@@ -3313,19 +3313,8 @@ function CodeShape({
     }, 250);
   };
 
-  const drawInto = (canvas: HTMLCanvasElement) => {
-    const ctx = canvas.getContext("2d");
-    if (!ctx) {
-      onUpdate?.(s.id, {
-        source: localSource,
-        error: "Couldn't get a 2D context on the Output canvas.",
-      });
-      return;
-    }
-    // The OutputShape's ResizeObserver keeps width/height in sync; just
-    // clear and run in CSS pixels.
-    ctx.clearRect(0, 0, canvas.clientWidth, canvas.clientHeight);
-    const result = runJsOnCanvas(localSource, ctx, canvas);
+  const runInto = (iframe: HTMLIFrameElement) => {
+    const result = runInIframe(iframe, localSource);
     onUpdate?.(s.id, {
       source: localSource,
       error: result.ok ? undefined : result.error ?? undefined,
@@ -3348,12 +3337,12 @@ function CodeShape({
     }
 
     // 1) If this JS block already has a linked Output that still exists in
-    //    the scene, draw into it. Other Output shapes elsewhere in the
+    //    the scene, run into it. Other Output shapes elsewhere in the
     //    scene are ignored — every JS block owns exactly its own Output.
     if (s.linkedOutputId) {
       const linked = outputRegistry.get(s.linkedOutputId);
       if (linked) {
-        drawInto(linked);
+        runInto(linked);
         return;
       }
     }
@@ -3391,11 +3380,11 @@ function CodeShape({
           });
           return;
         }
-        const canvas = outputRegistry.get(newId)!;
+        const iframe = outputRegistry.get(newId)!;
         // Link this JS block to the Output we just spawned so all future
-        // Runs draw into the same canvas.
+        // Runs go into the same iframe.
         onUpdate?.(s.id, { source: localSource, linkedOutputId: newId });
-        drawInto(canvas);
+        runInto(iframe);
       }, 0);
     });
   };
@@ -3573,42 +3562,26 @@ function OutputShape({
   const boxW = right - left;
   const boxH = bottom - top;
 
-  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const iframeRef = useRef<HTMLIFrameElement>(null);
   const headerH = 24;
 
-  // Register this canvas in the SceneCanvas-scoped registry so CodeShape's
-  // Run can find it. Cleanup removes on unmount. Each SceneCanvas instance
-  // has its own registry (via context), so the editor and a preview
-  // rendering the same scene each own their own canvas.
+  // Register this iframe in the SceneCanvas-scoped registry so CodeShape's
+  // Run can find it. Wait until the iframe has finished parsing its srcdoc
+  // before making it available — a not-yet-loaded iframe has a null
+  // contentDocument and any inject would fail silently.
   useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas || !outputRegistry) return;
-    outputRegistry.set(s.id, canvas);
+    const iframe = iframeRef.current;
+    if (!iframe || !outputRegistry) return;
+    const register = () => {
+      if (iframe.contentDocument?.body) outputRegistry.set(s.id, iframe);
+    };
+    if (iframe.contentDocument?.readyState === "complete") register();
+    else iframe.addEventListener("load", register);
     return () => {
+      iframe.removeEventListener("load", register);
       outputRegistry.delete(s.id);
     };
   }, [s.id, outputRegistry]);
-
-  // Keep the canvas backing store synced with CSS size × devicePixelRatio
-  // (same reason as any HiDPI-aware canvas — 300×150 default otherwise).
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const resize = () => {
-      const dpr = window.devicePixelRatio || 1;
-      const cssW = canvas.clientWidth;
-      const cssH = canvas.clientHeight;
-      if (cssW <= 0 || cssH <= 0) return;
-      canvas.width = Math.floor(cssW * dpr);
-      canvas.height = Math.floor(cssH * dpr);
-      const ctx = canvas.getContext("2d");
-      if (ctx) ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    };
-    resize();
-    const ro = new ResizeObserver(resize);
-    ro.observe(canvas);
-    return () => ro.disconnect();
-  }, []);
 
   const stopDrag = (e: React.MouseEvent) => e.stopPropagation();
 
@@ -3659,8 +3632,10 @@ function OutputShape({
           >
             Output
           </div>
-          <canvas
-            ref={canvasRef}
+          <iframe
+            ref={iframeRef}
+            title="output"
+            srcDoc={OUTPUT_IFRAME_SRC}
             onMouseDown={stopDrag}
             onMouseMove={stopDrag}
             onClick={stopDrag}
@@ -3668,6 +3643,7 @@ function OutputShape({
               flex: "1 1 auto",
               minHeight: 0,
               width: "100%",
+              border: "none",
               background: "#0a0a0c",
               display: "block",
             }}
