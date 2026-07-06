@@ -425,3 +425,68 @@ export async function moveCategoryAction(formData: FormData): Promise<void> {
   revalidatePath("/admin/categories");
   revalidatePath("/dashboard");
 }
+
+// ---------------- Blogs ----------------
+
+// Admin-only. Inserts an empty draft and redirects into the editor so the
+// author can start writing immediately — no create-form step needed.
+export async function createBlogAction(): Promise<void> {
+  const session = await getSession();
+  if (!session || session.role !== "admin") return;
+  const now = Date.now();
+  const inserted = await dbGet<{ id: number }>(
+    "INSERT INTO blogs (author_id, title, body, published, created_at, updated_at) VALUES ($1, '', '', FALSE, $2, $2) RETURNING id",
+    [session.userId, now],
+  );
+  if (!inserted) return;
+  revalidatePath("/admin/blogs");
+  redirect(`/admin/blogs/${inserted.id}`);
+}
+
+export async function saveBlogAction(
+  _prev: FormState,
+  formData: FormData,
+): Promise<FormState> {
+  const session = await getSession();
+  if (!session || session.role !== "admin")
+    return { error: "Not authorized." };
+
+  const id = Number(formData.get("id"));
+  if (!Number.isInteger(id) || id <= 0) return { error: "Invalid blog." };
+
+  const title = String(formData.get("title") ?? "").trim();
+  const body = String(formData.get("body") ?? "");
+  // Native checkbox posts "on" when checked and nothing when unchecked;
+  // we normalize to a boolean.
+  const publishedRaw = String(formData.get("published") ?? "");
+  const published = publishedRaw === "on" || publishedRaw === "true";
+
+  if (title.length > 200) return { error: "Title is too long." };
+
+  try {
+    await dbExec(
+      "UPDATE blogs SET title = $1, body = $2, published = $3, updated_at = $4 WHERE id = $5",
+      [title, body, published, Date.now(), id],
+    );
+  } catch (e) {
+    return {
+      error: `Couldn't save post: ${e instanceof Error ? e.message : String(e)}`,
+    };
+  }
+
+  revalidatePath("/admin/blogs");
+  revalidatePath("/blogs");
+  revalidatePath(`/blogs/${id}`);
+  return { ok: true };
+}
+
+export async function deleteBlogAction(formData: FormData): Promise<void> {
+  const session = await getSession();
+  if (!session || session.role !== "admin") return;
+  const id = Number(formData.get("id"));
+  if (!Number.isInteger(id) || id <= 0) return;
+  await dbExec("DELETE FROM blogs WHERE id = $1", [id]);
+  revalidatePath("/admin/blogs");
+  revalidatePath("/blogs");
+  redirect("/admin/blogs");
+}

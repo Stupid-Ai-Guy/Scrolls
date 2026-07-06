@@ -1,37 +1,48 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { getSession } from "@/lib/session";
-import { deleteLessonAction, logoutAction } from "@/lib/actions";
-import { dbAll, type LessonRow } from "@/lib/db";
-import { countBlocks, parseLessonContent } from "@/lib/lesson-content";
-import { gradeShortLabel, subjectPill } from "@/lib/curriculum";
+import {
+  createBlogAction,
+  deleteBlogAction,
+  logoutAction,
+} from "@/lib/actions";
+import { dbAll } from "@/lib/db";
 import { getTheme } from "@/lib/theme";
 import ThemeToggle from "@/components/theme-toggle";
-import ResetCompletionsButton from "./reset-completions-button";
+import ResetCompletionsButton from "../reset-completions-button";
+import DeleteBlogButton from "./delete-blog-button";
 
-export default async function StudioPage() {
+type BlogSummary = {
+  id: number;
+  title: string;
+  body: string;
+  published: boolean;
+  updated_at: number;
+  author_email: string;
+};
+
+function formatDate(ts: number): string {
+  return new Date(ts).toLocaleDateString(undefined, {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
+}
+
+function snippet(body: string): string {
+  const stripped = body.replace(/[#*_`$]/g, "").replace(/\s+/g, " ").trim();
+  if (stripped.length <= 140) return stripped;
+  return stripped.slice(0, 140).trimEnd() + "…";
+}
+
+export default async function AdminBlogsPage() {
   const session = await getSession();
   if (!session) redirect("/login");
   if (session.role !== "admin") redirect("/dashboard");
   const theme = await getTheme();
 
-  const lessons = await dbAll<LessonRow>(
-    "SELECT id, title, description, content, grade, subject, category_id, created_by, created_at FROM lessons ORDER BY created_at DESC",
-  );
-
-  const summaries = lessons.map((l) => {
-    const counts = countBlocks(parseLessonContent(l.content));
-    return { lesson: l, counts };
-  });
-
-  const totals = summaries.reduce(
-    (acc, { counts }) => {
-      acc.lessons += 1;
-      acc.questions += counts.question;
-      acc.blocks += counts.total;
-      return acc;
-    },
-    { lessons: 0, questions: 0, blocks: 0 },
+  const posts = await dbAll<BlogSummary>(
+    "SELECT b.id, b.title, b.body, b.published, b.updated_at, u.email AS author_email FROM blogs b JOIN users u ON b.author_id = u.id ORDER BY b.updated_at DESC",
   );
 
   return (
@@ -56,7 +67,8 @@ export default async function StudioPage() {
             </Link>
             <Link
               href="/admin/blogs"
-              className="rounded-lg px-3 py-1.5 text-sm font-medium text-zinc-300 hover:bg-zinc-900 hover:text-zinc-100"
+              className="rounded-lg bg-zinc-900 px-3 py-1.5 text-sm font-medium text-zinc-100 ring-1 ring-zinc-800"
+              aria-current="page"
             >
               Blogs
             </Link>
@@ -93,106 +105,98 @@ export default async function StudioPage() {
               {session.email}
             </p>
             <h1 className="mt-1 text-3xl font-semibold tracking-tight text-zinc-50">
-              Your lessons
+              Blog posts
             </h1>
             <p className="mt-2 max-w-xl text-sm text-zinc-400">
-              Author skills with explanation pages, diagrams, and interactive
-              questions. Saved lessons appear instantly for every learner.
+              Draft essays, notes, and announcements. Publish to make them
+              visible to signed-in readers.
             </p>
           </div>
-          <Link
-            href="/admin/new"
-            className="rounded-lg bg-cyan-500 px-4 py-2.5 text-sm font-semibold text-black transition hover:bg-cyan-400 hover:shadow-[0_0_30px_-6px_rgba(34,211,238,0.7)]"
-          >
-            New lesson
-          </Link>
-        </div>
-
-        <div className="mt-8 grid gap-3 sm:grid-cols-3">
-          <StatCard label="Lessons" value={totals.lessons} />
-          <StatCard label="Questions" value={totals.questions} />
-          <StatCard label="Total blocks" value={totals.blocks} />
+          <form action={createBlogAction}>
+            <button
+              type="submit"
+              className="rounded-lg bg-cyan-500 px-4 py-2.5 text-sm font-semibold text-black transition hover:bg-cyan-400 hover:shadow-[0_0_30px_-6px_rgba(34,211,238,0.7)]"
+            >
+              New blog
+            </button>
+          </form>
         </div>
 
         <section className="mt-10">
           <h2 className="text-sm font-semibold uppercase tracking-[0.2em] text-zinc-500">
-            All lessons
+            All posts
           </h2>
 
-          {summaries.length === 0 ? (
+          {posts.length === 0 ? (
             <div className="mt-4 rounded-2xl border border-dashed border-zinc-800 bg-zinc-950 px-6 py-16 text-center">
               <h3 className="text-base font-semibold text-zinc-100">
-                No lessons yet
+                No posts yet
               </h3>
               <p className="mx-auto mt-1 max-w-sm text-sm text-zinc-500">
-                Create your first lesson and start adding questions and
-                explanations.
+                Start a draft — you can leave it unpublished until it&apos;s
+                ready.
               </p>
-              <Link
-                href="/admin/new"
-                className="mt-5 inline-flex items-center justify-center rounded-lg bg-cyan-500 px-4 py-2 text-sm font-semibold text-black hover:bg-cyan-400"
-              >
-                Create your first lesson
-              </Link>
+              <form action={createBlogAction}>
+                <button
+                  type="submit"
+                  className="mt-5 inline-flex items-center justify-center rounded-lg bg-cyan-500 px-4 py-2 text-sm font-semibold text-black hover:bg-cyan-400"
+                >
+                  Create your first post
+                </button>
+              </form>
             </div>
           ) : (
             <ul className="mt-4 space-y-2">
-              {summaries.map(({ lesson: l, counts }) => (
+              {posts.map((p) => (
                 <li
-                  key={l.id}
+                  key={p.id}
                   className="group flex items-start justify-between gap-4 rounded-xl bg-zinc-950 p-5 ring-1 ring-zinc-800 transition hover:ring-cyan-400/40"
                 >
                   <Link
-                    href={`/admin/lessons/${l.id}`}
+                    href={`/admin/blogs/${p.id}`}
                     className="min-w-0 flex-1"
                   >
                     <div className="flex flex-wrap items-center gap-2">
                       <span className="font-medium text-zinc-100 hover:text-cyan-300">
-                        {l.title || "Untitled lesson"}
+                        {p.title || "Untitled"}
                       </span>
-                      <span
-                        className={`rounded-full px-2 py-0.5 text-xs font-medium ${subjectPill(l.subject)}`}
-                      >
-                        {l.subject}
-                      </span>
-                      <span className="rounded-full bg-zinc-900 px-2 py-0.5 text-xs font-medium text-zinc-300 ring-1 ring-zinc-800">
-                        {gradeShortLabel(l.grade)}
-                      </span>
+                      {p.published ? (
+                        <span className="rounded-full bg-cyan-500/10 px-2 py-0.5 text-xs font-medium text-cyan-300 ring-1 ring-cyan-500/30">
+                          Published
+                        </span>
+                      ) : (
+                        <span className="rounded-full bg-zinc-800 px-2 py-0.5 text-xs font-medium text-zinc-400 ring-1 ring-zinc-700">
+                          Draft
+                        </span>
+                      )}
                     </div>
-                    {l.description && (
-                      <p className="mt-1 text-sm text-zinc-400">
-                        {l.description}
+                    {snippet(p.body) && (
+                      <p className="mt-1 text-sm text-zinc-400 line-clamp-2">
+                        {snippet(p.body)}
                       </p>
                     )}
                     <p className="mt-2 text-xs text-zinc-500">
-                      {counts.question} question
-                      {counts.question === 1 ? "" : "s"} · {counts.interactive}{" "}
-                      interactive · {counts.text} explanation
-                      {counts.text === 1 ? "" : "s"} · {counts.image} diagram
-                      {counts.image === 1 ? "" : "s"}
+                      {p.author_email} · updated {formatDate(p.updated_at)}
                     </p>
                   </Link>
                   <div className="flex items-center gap-1">
+                    {p.published && (
+                      <Link
+                        href={`/blogs/${p.id}`}
+                        className="rounded-lg px-2.5 py-1.5 text-xs font-medium text-zinc-400 hover:bg-zinc-900 hover:text-zinc-100"
+                      >
+                        View
+                      </Link>
+                    )}
                     <Link
-                      href={`/lessons/${l.id}`}
-                      className="rounded-lg px-2.5 py-1.5 text-xs font-medium text-zinc-400 hover:bg-zinc-900 hover:text-zinc-100"
-                    >
-                      Preview
-                    </Link>
-                    <Link
-                      href={`/admin/lessons/${l.id}`}
+                      href={`/admin/blogs/${p.id}`}
                       className="rounded-lg px-2.5 py-1.5 text-xs font-medium text-cyan-300 hover:bg-zinc-900"
                     >
                       Edit
                     </Link>
-                    <form action={deleteLessonAction}>
-                      <input type="hidden" name="id" value={l.id} />
-                      <button
-                        type="submit"
-                        className="rounded-lg px-2.5 py-1.5 text-xs font-medium text-rose-400 opacity-0 transition hover:bg-rose-500/10 group-hover:opacity-100"
-                      >
-                        Delete
-                      </button>
+                    <form action={deleteBlogAction}>
+                      <input type="hidden" name="id" value={p.id} />
+                      <DeleteBlogButton title={p.title || "Untitled"} />
                     </form>
                   </div>
                 </li>
@@ -201,19 +205,6 @@ export default async function StudioPage() {
           )}
         </section>
       </main>
-    </div>
-  );
-}
-
-function StatCard({ label, value }: { label: string; value: number }) {
-  return (
-    <div className="rounded-2xl bg-zinc-950 p-5 ring-1 ring-zinc-800">
-      <p className="text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
-        {label}
-      </p>
-      <p className="mt-2 text-3xl font-semibold tracking-tight text-zinc-50">
-        {value}
-      </p>
     </div>
   );
 }

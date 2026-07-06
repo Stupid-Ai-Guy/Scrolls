@@ -1,7 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { jwtVerify } from "jose";
 
-const USER_PROTECTED = ["/dashboard", "/lessons"];
+const USER_PROTECTED = ["/dashboard", "/lessons", "/blogs"];
 const ADMIN_PROTECTED = ["/admin"];
 
 function getSecret(): Uint8Array {
@@ -30,5 +30,10 @@ export async function middleware(req: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/dashboard/:path*", "/admin/:path*", "/lessons/:path*"],
+  matcher: [
+    "/dashboard/:path*",
+    "/admin/:path*",
+    "/lessons/:path*",
+    "/blogs/:path*",
+  ],
 };

@@ -185,6 +185,12 @@ export default async function DashboardPage({
                 </Link>
               );
             })}
+            <Link
+              href="/blogs"
+              className="rounded-full px-4 py-1.5 text-sm font-medium text-zinc-500 hover:text-zinc-200"
+            >
+              Blogs
+            </Link>
           </nav>
 
           <div className="flex items-center gap-2">
@@ -234,6 +240,12 @@ export default async function DashboardPage({
                 </Link>
               );
             })}
+            <Link
+              href="/blogs"
+              className="rounded-full px-3 py-1 text-xs font-medium text-zinc-500 hover:bg-zinc-900"
+            >
+              Blogs
+            </Link>
           </div>
         </nav>
       </header>

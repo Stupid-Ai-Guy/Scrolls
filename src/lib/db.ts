@@ -101,6 +101,21 @@ async function _init(): Promise<void> {
     "stage",
     "TEXT NOT NULL DEFAULT 'initial'",
   );
+  // Blogs (admin-authored posts, reader-visible under /blogs).
+  await sql(`
+    CREATE TABLE IF NOT EXISTS blogs (
+      id          SERIAL PRIMARY KEY,
+      author_id   INTEGER NOT NULL,
+      title       TEXT NOT NULL DEFAULT '',
+      body        TEXT NOT NULL DEFAULT '',
+      published   BOOLEAN NOT NULL DEFAULT FALSE,
+      created_at  BIGINT NOT NULL,
+      updated_at  BIGINT NOT NULL
+    )
+  `);
+  await sql(
+    "CREATE INDEX IF NOT EXISTS blogs_updated_idx ON blogs (published, updated_at DESC)",
+  );
 }
 
 function init(): Promise<void> {
@@ -180,4 +195,14 @@ export type CategoryRow = {
   name: string;
   position: number;
   created_at: number;
+};
+
+export type BlogRow = {
+  id: number;
+  author_id: number;
+  title: string;
+  body: string;
+  published: boolean;
+  created_at: number;
+  updated_at: number;
 };
