@@ -3252,19 +3252,33 @@ function CodeShape({
       timerRef.current = null;
       pendingRef.current = null;
     }
-    // Draw into the first output shape in the scene. Its OutputShape
-    // component registered its canvas in the module-scope outputCanvases
-    // map on mount.
-    const first = outputCanvases.values().next().value as
-      | HTMLCanvasElement
+    // Where an Output block SHOULD sit: right of this JS block's right
+    // edge with a 1-unit gap, vertically centered on it.
+    const outputDefaultW = 10;
+    const spawnWx = s.x + (s.w ?? 10) / 2 + outputDefaultW / 2 + 1;
+    const spawnWy = s.y;
+
+    const firstEntry = outputCanvases.entries().next().value as
+      | [string, HTMLCanvasElement]
       | undefined;
-    if (first) {
-      drawInto(first);
+
+    if (firstEntry) {
+      // An Output block already exists somewhere in the scene. Slide it to
+      // be adjacent to the JS block that just ran, then draw. This is what
+      // authors expect — the output tracks the code, not the other way
+      // around — and it avoids the "output is stuck at the bottom" case
+      // where an old Output block was placed far from the current JS.
+      const [outputId, canvas] = firstEntry;
+      onUpdate?.(outputId, { x: spawnWx, y: spawnWy });
+      // Give React a frame to reposition the foreignObject / canvas layout
+      // (the ResizeObserver on OutputShape will re-sync width/height), then
+      // draw. Two ticks for good measure on slower devices.
+      requestAnimationFrame(() => {
+        setTimeout(() => drawInto(canvas), 0);
+      });
       return;
     }
-    // No output block yet — auto-summon one right next to this JS block.
-    // Position it just to the right of our right edge with a 1-unit gap so
-    // both boxes are visible without overlapping.
+
     if (!onPlaceShape) {
       onUpdate?.(s.id, {
         source: localSource,
@@ -3272,13 +3286,9 @@ function CodeShape({
       });
       return;
     }
-    const outputDefaultW = 10;
-    const spawnWx = s.x + (s.w ?? 10) / 2 + outputDefaultW / 2 + 1;
-    const spawnWy = s.y;
+    // No Output yet — create one adjacent, then draw once the OutputShape's
+    // useEffect has registered the canvas in the outputCanvases map.
     onPlaceShape("output", spawnWx, spawnWy);
-    // Wait for React to commit the new shape and OutputShape's useEffect to
-    // register its canvas, then run. A single rAF is usually enough; the
-    // extra setTimeout is belt-and-suspenders for slower devices.
     requestAnimationFrame(() => {
       setTimeout(() => {
         const next = outputCanvases.values().next().value as
