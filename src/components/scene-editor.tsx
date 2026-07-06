@@ -1276,6 +1276,7 @@ function SceneCanvas({
               ? (e) => handleShapeContextMenu(e, s)
               : undefined,
             onUpdate: onUpdateShape,
+            onPlaceShape,
           }),
         )}
 
@@ -1551,6 +1552,11 @@ function renderShape(
     onMouseDown?: (e: React.MouseEvent<SVGGElement>) => void;
     onContextMenu?: (e: React.MouseEvent<SVGGElement>) => void;
     onUpdate?: (id: string, patch: Partial<SceneShape>) => void;
+    onPlaceShape?: (
+      kind: SceneShape["kind"],
+      wx: number,
+      wy: number,
+    ) => void;
   },
 ) {
   const color = COLORS[s.color] ?? s.color;
@@ -1775,6 +1781,7 @@ function renderShape(
         color={color}
         interact={interact}
         onUpdate={ctx.onUpdate}
+        onPlaceShape={ctx.onPlaceShape}
       />
     );
   }
@@ -3163,6 +3170,7 @@ function CodeShape({
   color,
   interact,
   onUpdate,
+  onPlaceShape,
 }: {
   s: SceneShape & { kind: "code" };
   toX: (wx: number) => number;
@@ -3175,6 +3183,11 @@ function CodeShape({
     style?: React.CSSProperties;
   };
   onUpdate?: (id: string, patch: Partial<SceneShape>) => void;
+  onPlaceShape?: (
+    kind: SceneShape["kind"],
+    wx: number,
+    wy: number,
+  ) => void;
 }) {
   const w = s.w ?? 10;
   const h = s.h ?? 8;
@@ -3213,26 +3226,8 @@ function CodeShape({
     }, 250);
   };
 
-  const handleRun = () => {
-    // Flush any pending source first so we run what the user sees.
-    if (timerRef.current) {
-      clearTimeout(timerRef.current);
-      timerRef.current = null;
-      pendingRef.current = null;
-    }
-    // Draw to the first output shape in the scene. Its OutputShape component
-    // registered its canvas in the module-scope outputCanvases map on mount.
-    const first = outputCanvases.values().next().value as
-      | HTMLCanvasElement
-      | undefined;
-    if (!first) {
-      onUpdate?.(s.id, {
-        source: localSource,
-        error: "No Output block in this scene — drop one from the sidebar.",
-      });
-      return;
-    }
-    const ctx = first.getContext("2d");
+  const drawInto = (canvas: HTMLCanvasElement) => {
+    const ctx = canvas.getContext("2d");
     if (!ctx) {
       onUpdate?.(s.id, {
         source: localSource,
@@ -3240,15 +3235,64 @@ function CodeShape({
       });
       return;
     }
-    // The OutputShape's own ResizeObserver keeps width/height in sync; just
+    // The OutputShape's ResizeObserver keeps width/height in sync; just
     // clear and run in CSS pixels.
-    const cssW = first.clientWidth;
-    const cssH = first.clientHeight;
-    ctx.clearRect(0, 0, cssW, cssH);
-    const result = runJsOnCanvas(localSource, ctx, first);
+    ctx.clearRect(0, 0, canvas.clientWidth, canvas.clientHeight);
+    const result = runJsOnCanvas(localSource, ctx, canvas);
     onUpdate?.(s.id, {
       source: localSource,
       error: result.ok ? undefined : result.error ?? undefined,
+    });
+  };
+
+  const handleRun = () => {
+    // Flush any pending source first so we run what the user sees.
+    if (timerRef.current) {
+      clearTimeout(timerRef.current);
+      timerRef.current = null;
+      pendingRef.current = null;
+    }
+    // Draw into the first output shape in the scene. Its OutputShape
+    // component registered its canvas in the module-scope outputCanvases
+    // map on mount.
+    const first = outputCanvases.values().next().value as
+      | HTMLCanvasElement
+      | undefined;
+    if (first) {
+      drawInto(first);
+      return;
+    }
+    // No output block yet — auto-summon one right next to this JS block.
+    // Position it just to the right of our right edge with a 1-unit gap so
+    // both boxes are visible without overlapping.
+    if (!onPlaceShape) {
+      onUpdate?.(s.id, {
+        source: localSource,
+        error: "No Output block in this scene, and I can't add one here.",
+      });
+      return;
+    }
+    const outputDefaultW = 10;
+    const spawnWx = s.x + (s.w ?? 10) / 2 + outputDefaultW / 2 + 1;
+    const spawnWy = s.y;
+    onPlaceShape("output", spawnWx, spawnWy);
+    // Wait for React to commit the new shape and OutputShape's useEffect to
+    // register its canvas, then run. A single rAF is usually enough; the
+    // extra setTimeout is belt-and-suspenders for slower devices.
+    requestAnimationFrame(() => {
+      setTimeout(() => {
+        const next = outputCanvases.values().next().value as
+          | HTMLCanvasElement
+          | undefined;
+        if (!next) {
+          onUpdate?.(s.id, {
+            source: localSource,
+            error: "Output block couldn't be created.",
+          });
+          return;
+        }
+        drawInto(next);
+      }, 0);
     });
   };
 
