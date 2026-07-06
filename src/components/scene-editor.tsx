@@ -3339,12 +3339,6 @@ function CodeShape({
       timerRef.current = null;
       pendingRef.current = null;
     }
-    // Where an Output block SHOULD sit: right of this JS block's right
-    // edge with a 1-unit gap, vertically centered on it.
-    const outputDefaultW = 10;
-    const spawnWx = s.x + (s.w ?? 10) / 2 + outputDefaultW / 2 + 1;
-    const spawnWy = s.y;
-
     if (!outputRegistry) {
       onUpdate?.(s.id, {
         source: localSource,
@@ -3352,50 +3346,56 @@ function CodeShape({
       });
       return;
     }
-    const firstEntry = outputRegistry.entries().next().value as
-      | [string, HTMLCanvasElement]
-      | undefined;
 
-    if (firstEntry) {
-      // An Output block already exists somewhere in the scene. Slide it to
-      // be adjacent to the JS block that just ran, then draw. This is what
-      // authors expect — the output tracks the code, not the other way
-      // around — and it avoids the "output is stuck at the bottom" case
-      // where an old Output block was placed far from the current JS.
-      const [outputId, canvas] = firstEntry;
-      onUpdate?.(outputId, { x: spawnWx, y: spawnWy });
-      // Give React a frame to reposition the foreignObject / canvas layout
-      // (the ResizeObserver on OutputShape will re-sync width/height), then
-      // draw. Two ticks for good measure on slower devices.
-      requestAnimationFrame(() => {
-        setTimeout(() => drawInto(canvas), 0);
-      });
-      return;
+    // 1) If this JS block already has a linked Output that still exists in
+    //    the scene, draw into it. Other Output shapes elsewhere in the
+    //    scene are ignored — every JS block owns exactly its own Output.
+    if (s.linkedOutputId) {
+      const linked = outputRegistry.get(s.linkedOutputId);
+      if (linked) {
+        drawInto(linked);
+        return;
+      }
     }
 
+    // 2) Otherwise, spawn a fresh Output right next to this JS block:
+    //    just past our right edge with a 1-unit gap, same vertical center.
     if (!onPlaceShape) {
       onUpdate?.(s.id, {
         source: localSource,
-        error: "No Output block in this scene, and I can't add one here.",
+        error: "No Output block for this JS block, and I can't add one here.",
       });
       return;
     }
-    // No Output yet — create one adjacent, then draw once the OutputShape's
-    // useEffect has registered the canvas in the per-SceneCanvas registry.
+    const outputDefaultW = 10;
+    const spawnWx = s.x + (s.w ?? 10) / 2 + outputDefaultW / 2 + 1;
+    const spawnWy = s.y;
+
+    // Snapshot which Outputs already existed so we can identify the newly
+    // added one after React commits the new shape.
+    const before = new Set(outputRegistry.keys());
     onPlaceShape("output", spawnWx, spawnWy);
     requestAnimationFrame(() => {
       setTimeout(() => {
-        const next = outputRegistry.values().next().value as
-          | HTMLCanvasElement
-          | undefined;
-        if (!next) {
+        let newId: string | undefined;
+        for (const id of outputRegistry.keys()) {
+          if (!before.has(id)) {
+            newId = id;
+            break;
+          }
+        }
+        if (!newId) {
           onUpdate?.(s.id, {
             source: localSource,
             error: "Output block couldn't be created.",
           });
           return;
         }
-        drawInto(next);
+        const canvas = outputRegistry.get(newId)!;
+        // Link this JS block to the Output we just spawned so all future
+        // Runs draw into the same canvas.
+        onUpdate?.(s.id, { source: localSource, linkedOutputId: newId });
+        drawInto(canvas);
       }, 0);
     });
   };

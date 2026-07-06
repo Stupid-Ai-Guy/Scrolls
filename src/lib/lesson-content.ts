@@ -135,6 +135,10 @@ export type SceneShape =
       source: string;
       color: string;
       error?: string;
+      // Id of the Output shape this JS block owns. Set on the first Run.
+      // Future Runs draw into that specific canvas — never any other
+      // Output shape floating around the scene.
+      linkedOutputId?: string;
     }
   | {
       // Canvas surface a code shape draws into. Kept separate so authors can
