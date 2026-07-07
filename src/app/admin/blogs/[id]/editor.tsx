@@ -3,34 +3,15 @@
 import Link from "next/link";
 import { useActionState, useMemo, useState } from "react";
 import { saveBlogAction, type FormState } from "@/lib/actions";
-import { renderBlogMarkdown } from "@/lib/blog-content";
+import { BLOG_PROSE_CLASSES, renderBlogBody } from "@/lib/blog-content";
 import ThemeToggle from "@/components/theme-toggle";
+import RichTextEditor from "@/components/rich-text-editor";
 import type { Theme } from "@/lib/theme";
 
 const fieldClass =
   "w-full rounded-lg bg-zinc-900 px-3 py-2 text-sm text-zinc-100 ring-1 ring-zinc-800 transition placeholder:text-zinc-600 focus:outline-none focus:ring-2 focus:ring-cyan-400";
 
 const initial: FormState = {};
-
-// Mirror the reader page's prose styling so the preview matches what a
-// signed-in reader will see. Kept in sync with src/app/blogs/[id]/page.tsx.
-const PROSE_CLASSES =
-  "text-zinc-200 leading-relaxed " +
-  "[&_h1]:mt-8 [&_h1]:text-2xl [&_h1]:font-semibold [&_h1]:text-zinc-50 " +
-  "[&_h2]:mt-6 [&_h2]:text-xl [&_h2]:font-semibold [&_h2]:text-zinc-50 " +
-  "[&_h3]:mt-5 [&_h3]:text-lg [&_h3]:font-semibold [&_h3]:text-zinc-100 " +
-  "[&_p]:mt-4 [&_p]:leading-relaxed " +
-  "[&_ul]:mt-3 [&_ul]:list-disc [&_ul]:pl-6 " +
-  "[&_ol]:mt-3 [&_ol]:list-decimal [&_ol]:pl-6 " +
-  "[&_li]:mt-1 " +
-  "[&_a]:text-cyan-300 [&_a]:underline hover:[&_a]:text-cyan-200 " +
-  "[&_code]:bg-zinc-900 [&_code]:px-1 [&_code]:rounded [&_code]:text-[0.9em] " +
-  "[&_pre]:bg-zinc-950 [&_pre]:p-4 [&_pre]:rounded-lg [&_pre]:ring-1 [&_pre]:ring-zinc-800 [&_pre]:mt-4 [&_pre]:overflow-x-auto " +
-  "[&_pre_code]:bg-transparent [&_pre_code]:p-0 " +
-  "[&_blockquote]:border-l-2 [&_blockquote]:border-cyan-500/40 [&_blockquote]:pl-4 [&_blockquote]:italic [&_blockquote]:mt-4 [&_blockquote]:text-zinc-300 " +
-  "[&_strong]:font-semibold [&_strong]:text-zinc-100 " +
-  "[&_em]:italic " +
-  "[&_hr]:my-8 [&_hr]:border-zinc-800";
 
 export default function BlogEditor({
   blogId,
@@ -51,9 +32,10 @@ export default function BlogEditor({
 
   const [state, formAction, pending] = useActionState(saveBlogAction, initial);
 
-  // Rendering markdown+katex on every keystroke would be wasteful; memo on
-  // the raw source so we only re-render when the body actually changes.
-  const bodyHtml = useMemo(() => renderBlogMarkdown(body), [body]);
+  // The WYSIWYG editor already shows formatting inline — the preview pane
+  // exists specifically to render KaTeX math (which $…$ doesn't do inside
+  // the editor). Memoize so we only re-render when the body changes.
+  const bodyHtml = useMemo(() => renderBlogBody(body), [body]);
 
   return (
     <div className="min-h-screen bg-black">
@@ -161,24 +143,17 @@ export default function BlogEditor({
               <label className="block text-sm font-medium text-zinc-300">
                 Body
               </label>
-              <textarea
-                value={body}
-                onChange={(e) => setBody(e.target.value)}
-                rows={24}
-                placeholder={"Write in Markdown.\n\n## A section\n\n- bullet\n- **bold**\n\nInline math: $E = mc^2$"}
-                spellCheck={false}
-                suppressHydrationWarning
-                className={`mt-1 ${fieldClass} font-mono text-[13px] leading-relaxed`}
-              />
+              <div className="mt-1">
+                <RichTextEditor value={body} onChange={setBody} />
+              </div>
             </div>
           </section>
 
           {/* ---------- Preview pane ---------- */}
           <section className="lg:sticky lg:top-24 lg:self-start">
             <div className="rounded-lg bg-zinc-900/60 px-3 py-2 text-xs text-zinc-400 ring-1 ring-zinc-800">
-              Markdown supported: <code>**bold**</code>, <code>## Heading</code>
-              , <code>- list</code>, <code>`code`</code>, <code>&gt; quote</code>
-              . Math: <code>$…$</code> inline, <code>$$…$$</code> display.
+              Use the toolbar for formatting. Math: <code>$…$</code> inline,{" "}
+              <code>$$…$$</code> display — rendered here on save-preview.
             </div>
             <div className="mt-3 rounded-2xl bg-zinc-950 p-6 ring-1 ring-zinc-800">
               <p className="text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
@@ -188,7 +163,7 @@ export default function BlogEditor({
                 {title || "Untitled"}
               </h1>
               <article
-                className={"mt-4 " + PROSE_CLASSES}
+                className={"mt-4 " + BLOG_PROSE_CLASSES}
                 dangerouslySetInnerHTML={{ __html: bodyHtml }}
               />
               {!body && (

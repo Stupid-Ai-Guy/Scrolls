@@ -1,12 +1,31 @@
 import { marked } from "marked";
 import katex from "katex";
 
-// Blog bodies are markdown with LaTeX interspersed. We split the source into
-// alternating markdown and math segments before feeding it to marked so the
-// markdown parser never touches the math (which would otherwise mangle `$`,
-// underscores in variable names, backslashes, etc.). Each math segment is
-// replaced with an inert placeholder marked won't rewrite, then swapped
-// back for the KaTeX-rendered HTML after markdown → HTML conversion.
+// Blog bodies are either legacy markdown (old posts) or Tiptap HTML (new
+// posts). Both paths run text through the same KaTeX pass so $…$ / $$…$$
+// keep working regardless of storage format. Call renderBlogBody() from
+// the reader; it dispatches by sniffing the leading char.
+
+// Shared Tailwind class fragment for the rendered article's "prose" look.
+// Used by the editor preview, the WYSIWYG editor canvas, and the public
+// reader page so all three stay visually identical.
+export const BLOG_PROSE_CLASSES =
+  "text-zinc-200 leading-relaxed " +
+  "[&_h1]:mt-8 [&_h1]:text-2xl [&_h1]:font-semibold [&_h1]:text-zinc-50 " +
+  "[&_h2]:mt-6 [&_h2]:text-xl [&_h2]:font-semibold [&_h2]:text-zinc-50 " +
+  "[&_h3]:mt-5 [&_h3]:text-lg [&_h3]:font-semibold [&_h3]:text-zinc-100 " +
+  "[&_p]:mt-4 [&_p]:leading-relaxed " +
+  "[&_ul]:mt-3 [&_ul]:list-disc [&_ul]:pl-6 " +
+  "[&_ol]:mt-3 [&_ol]:list-decimal [&_ol]:pl-6 " +
+  "[&_li]:mt-1 " +
+  "[&_a]:text-cyan-300 [&_a]:underline hover:[&_a]:text-cyan-200 " +
+  "[&_code]:bg-zinc-900 [&_code]:px-1 [&_code]:rounded [&_code]:text-[0.9em] " +
+  "[&_pre]:bg-zinc-950 [&_pre]:p-4 [&_pre]:rounded-lg [&_pre]:ring-1 [&_pre]:ring-zinc-800 [&_pre]:mt-4 [&_pre]:overflow-x-auto " +
+  "[&_pre_code]:bg-transparent [&_pre_code]:p-0 " +
+  "[&_blockquote]:border-l-2 [&_blockquote]:border-cyan-500/40 [&_blockquote]:pl-4 [&_blockquote]:italic [&_blockquote]:mt-4 [&_blockquote]:text-zinc-300 " +
+  "[&_strong]:font-semibold [&_strong]:text-zinc-100 " +
+  "[&_em]:italic " +
+  "[&_hr]:my-8 [&_hr]:border-zinc-800";
 
 type MathSegment = { value: string; display: boolean };
 
@@ -139,4 +158,62 @@ export function renderBlogMarkdown(source: string): string {
   }
   renderCache.set(source, html);
   return html;
+}
+
+// Sniff whether stored body content is Tiptap HTML or legacy markdown. We
+// look at the first non-whitespace char; Tiptap always emits a leading tag
+// (e.g. <p>, <h1>) and marked-authored content never starts with `<` for
+// the schemas the editor supports today.
+export function isHtmlBody(source: string): boolean {
+  return /^\s*</.test(source);
+}
+
+// Applies the same math-extraction pass as renderBlogMarkdown, but only to
+// the text content of an HTML string — tags and attributes are left alone.
+// The tokenizer is intentionally naive; it's only asked to distinguish a
+// tag from text, which the Tiptap-generated HTML we consume never nests.
+function renderMathInHtml(html: string): string {
+  let out = "";
+  let i = 0;
+  while (i < html.length) {
+    const lt = html.indexOf("<", i);
+    if (lt === -1) {
+      out += renderMathInText(html.slice(i));
+      break;
+    }
+    if (lt > i) out += renderMathInText(html.slice(i, lt));
+    const gt = html.indexOf(">", lt);
+    if (gt === -1) {
+      // Malformed — bail without further processing.
+      out += html.slice(lt);
+      break;
+    }
+    out += html.slice(lt, gt + 1);
+    i = gt + 1;
+  }
+  return out;
+}
+
+// Runs the shared extractMath tokenizer on a plain-text run and swaps each
+// placeholder for KaTeX-rendered HTML.
+function renderMathInText(text: string): string {
+  if (!text.includes("$")) return text;
+  const { text: withPlaceholders, math } = extractMath(text);
+  let out = withPlaceholders;
+  for (let idx = 0; idx < math.length; idx++) {
+    const placeholder = placeholderFor(idx);
+    const rendered = renderMath(math[idx]);
+    const re = new RegExp(escapeRegex(placeholder), "g");
+    out = out.replace(re, rendered);
+  }
+  return out;
+}
+
+// Entry point for both the reader page and the editor preview. Legacy
+// markdown posts still flow through renderBlogMarkdown; Tiptap HTML posts
+// only need the math pass since the markup is already final.
+export function renderBlogBody(source: string): string {
+  if (!source) return "";
+  if (isHtmlBody(source)) return renderMathInHtml(source);
+  return renderBlogMarkdown(source);
 }
