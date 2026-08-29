@@ -14,6 +14,7 @@ import katex from "katex";
 import { recordLessonCompletionAction } from "@/lib/actions";
 import ScrollScriptRunner from "@/components/scrollscript-runner";
 import { SceneRunner } from "@/components/scene-editor";
+import { TldrawReader } from "@/components/tldraw-canvas";
 import { RichText } from "@/lib/rich-text";
 import ThemeToggle from "@/components/theme-toggle";
 import type { Theme } from "@/lib/theme";
@@ -597,6 +598,12 @@ function QuestionView({
         )}
       </h2>
 
+      {block.canvas !== undefined && (
+        <div className="mt-5">
+          <TldrawReader snapshot={block.canvas} />
+        </div>
+      )}
+
       {block.imageUrl && (
         <div className="mt-5 overflow-hidden rounded-xl bg-zinc-900 ring-1 ring-zinc-800">
           {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -951,6 +958,12 @@ function WritingView({
           "Untitled question"
         )}
       </h2>
+
+      {block.canvas !== undefined && (
+        <div className="mt-5">
+          <TldrawReader snapshot={block.canvas} />
+        </div>
+      )}
 
       {block.imageUrl && (
         <div className="mt-5 overflow-hidden rounded-xl bg-zinc-900 ring-1 ring-zinc-800">

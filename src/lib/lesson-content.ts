@@ -10,6 +10,10 @@ export type ImageBlock = {
   caption?: string;
 };
 
+// Opaque tldraw snapshot. Stored as JSON in the block; the tldraw component
+// is the only reader/writer so we don't validate its shape here.
+export type CanvasSnapshot = unknown;
+
 export type QuestionBlock = {
   type: "question";
   prompt: string;
@@ -17,6 +21,7 @@ export type QuestionBlock = {
   correctIndex: number;
   explanation?: string;
   imageUrl?: string;
+  canvas?: CanvasSnapshot;
 };
 
 // Free-response question. The author lists one or more accepted answers;
@@ -35,6 +40,7 @@ export type WritingBlock = {
   buttons?: { label: string; latex: string }[];
   explanation?: string;
   imageUrl?: string;
+  canvas?: CanvasSnapshot;
 };
 
 export type SceneShape =

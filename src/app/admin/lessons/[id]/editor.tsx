@@ -20,7 +20,8 @@ import {
   SceneEditor as VisualSceneEditor,
   SceneRunner,
 } from "@/components/scene-editor";
-import type { Scene } from "@/lib/lesson-content";
+import { TldrawAuthor } from "@/components/tldraw-canvas";
+import type { CanvasSnapshot, Scene } from "@/lib/lesson-content";
 import ThemeToggle from "@/components/theme-toggle";
 import type { Theme } from "@/lib/theme";
 
@@ -1187,6 +1188,51 @@ function ImageEditor({
   );
 }
 
+function CanvasField({
+  canvas,
+  onChange,
+}: {
+  canvas?: CanvasSnapshot;
+  onChange: (next: CanvasSnapshot | undefined) => void;
+}) {
+  // Local "expanded" state so the heavy tldraw bundle only loads once the
+  // author opts in. Starts open if a canvas is already saved on this block.
+  const [expanded, setExpanded] = useState(canvas !== undefined);
+
+  return (
+    <div>
+      <div className="mb-2 flex items-center justify-between">
+        <p className="text-xs font-medium uppercase tracking-wider text-zinc-500">
+          Canvas (optional)
+        </p>
+        {expanded && (
+          <button
+            type="button"
+            onClick={() => {
+              setExpanded(false);
+              onChange(undefined);
+            }}
+            className="text-xs font-medium text-rose-400 hover:text-rose-300"
+          >
+            Remove
+          </button>
+        )}
+      </div>
+      {expanded ? (
+        <TldrawAuthor snapshot={canvas} onChange={(s) => onChange(s)} />
+      ) : (
+        <button
+          type="button"
+          onClick={() => setExpanded(true)}
+          className="w-full rounded-lg border border-dashed border-zinc-800 bg-zinc-950 px-3 py-3 text-sm font-medium text-zinc-400 transition hover:border-zinc-700 hover:text-zinc-200"
+        >
+          + Add canvas
+        </button>
+      )}
+    </div>
+  );
+}
+
 function QuestionEditor({
   block,
   onUpdate,
@@ -1231,6 +1277,11 @@ function QuestionEditor({
         <code className="text-zinc-300">$$…$$</code> for display. Works in
         the prompt, options, and explanation.
       </p>
+
+      <CanvasField
+        canvas={block.canvas}
+        onChange={(next) => onUpdate({ canvas: next })}
+      />
 
       <div>
         <p className="mb-2 text-xs font-medium uppercase tracking-wider text-zinc-500">
@@ -1357,6 +1408,11 @@ function WritingEditor({
         <code className="text-zinc-300">$$…$$</code> for display. Works in
         the prompt and explanation.
       </p>
+
+      <CanvasField
+        canvas={block.canvas}
+        onChange={(next) => onUpdate({ canvas: next })}
+      />
 
       <div>
         <p className="mb-2 text-xs font-medium uppercase tracking-wider text-zinc-500">
