@@ -66,6 +66,7 @@ export default function AddLessonModal({
   onClose: () => void;
   categories: CategoryOption[];
 }) {
+  const headingId = useId();
   const titleId = useId();
   const descId = useId();
   const [draft, setDraft] = useState<Draft>(EMPTY_DRAFT);
@@ -168,7 +169,7 @@ export default function AddLessonModal({
     <div
       role="dialog"
       aria-modal="true"
-      aria-labelledby={titleId}
+      aria-labelledby={headingId}
       onClick={requestClose}
       className="fixed inset-0 z-40 bg-black/60 backdrop-blur-sm"
     >
@@ -179,23 +180,17 @@ export default function AddLessonModal({
         <form
           ref={formRef}
           action={formAction}
-          className="flex flex-col gap-5 p-6"
+          className="flex flex-col gap-3.5 p-5"
         >
-          <div className="flex items-start justify-between gap-4">
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-cyan-300">
-                New lesson
-              </p>
-              <p className="mt-1 text-xs text-zinc-500">
-                You&apos;ll add questions, explanations, and diagrams on the
-                next screen.
-              </p>
-            </div>
+          <div className="flex items-center justify-between gap-3">
+            <p id={headingId} className="text-xs font-semibold uppercase tracking-[0.2em] text-cyan-300">
+              New lesson
+            </p>
             <button
               type="button"
               onClick={requestClose}
               aria-label="Close"
-              className="rounded-md p-1.5 text-zinc-500 transition hover:bg-zinc-900 hover:text-zinc-200"
+              className="rounded-md p-1 text-zinc-500 transition hover:bg-zinc-900 hover:text-zinc-200"
             >
               <svg
                 viewBox="0 0 16 16"
