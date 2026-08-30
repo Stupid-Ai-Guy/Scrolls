@@ -170,16 +170,16 @@ export default function AddLessonModal({
       aria-modal="true"
       aria-labelledby={titleId}
       onClick={requestClose}
-      className="fixed inset-0 z-40 flex items-start justify-center overflow-y-auto bg-black/70 px-4 py-16 backdrop-blur-sm"
+      className="fixed inset-0 z-40 bg-black/60 backdrop-blur-sm"
     >
       <div
         onClick={(e) => e.stopPropagation()}
-        className="w-full max-w-xl rounded-2xl bg-zinc-950 ring-1 ring-zinc-800 shadow-2xl"
+        className="fixed inset-y-0 right-0 flex w-full max-w-md flex-col overflow-y-auto border-l border-zinc-800 bg-zinc-950 shadow-2xl"
       >
         <form
           ref={formRef}
           action={formAction}
-          className="flex flex-col gap-5 p-6"
+          className="flex min-h-full flex-col gap-5 p-6"
         >
           <div className="flex items-start justify-between gap-4">
             <div>
