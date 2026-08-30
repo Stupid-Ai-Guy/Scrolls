@@ -91,7 +91,7 @@ async function admitAsAdmin(email: string): Promise<never> {
   }
 
   await createSession({ userId, email, role: "admin" });
-  redirect("/admin");
+  redirect("/dashboard");
 }
 
 export async function signupAction(
