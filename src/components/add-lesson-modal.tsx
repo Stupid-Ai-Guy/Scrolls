@@ -2,13 +2,11 @@
 
 import {
   useActionState,
-  useCallback,
   useEffect,
   useId,
   useRef,
   useState,
 } from "react";
-import { createPortal } from "react-dom";
 import { createLessonAction, type FormState } from "@/lib/actions";
 
 const initial: FormState = {};
@@ -70,15 +68,50 @@ export default function AddLessonModal({
   const headingId = useId();
   const titleId = useId();
   const descId = useId();
-  const [mounted, setMounted] = useState(false);
-  useEffect(() => setMounted(true), []);
   const [draft, setDraft] = useState<Draft>(EMPTY_DRAFT);
   const [state, formAction, pending] = useActionState(
     createLessonAction,
     initial,
   );
+  const popoverRef = useRef<HTMLDivElement>(null);
   const titleRef = useRef<HTMLInputElement>(null);
   const formRef = useRef<HTMLFormElement>(null);
+
+  // Sync the parent's `open` prop to the native popover API. Browser puts
+  // the element in the top layer — no z-index, no portal, no containing
+  // block gotchas from ancestor backdrop-filter / transform.
+  useEffect(() => {
+    const el = popoverRef.current;
+    if (!el) return;
+    if (open) {
+      try {
+        el.showPopover();
+      } catch {
+        /* already open or unsupported */
+      }
+      const t = setTimeout(() => titleRef.current?.focus(), 30);
+      return () => clearTimeout(t);
+    }
+    try {
+      el.hidePopover();
+    } catch {
+      /* already closed */
+    }
+  }, [open]);
+
+  // Sync browser-initiated close (Esc key, click outside, another auto
+  // popover opening) back to parent state. Guard against firing while the
+  // parent already thinks we're closed.
+  useEffect(() => {
+    const el = popoverRef.current;
+    if (!el) return;
+    function onToggle(e: Event) {
+      const newState = (e as unknown as { newState: string }).newState;
+      if (newState === "closed") onClose();
+    }
+    el.addEventListener("toggle", onToggle);
+    return () => el.removeEventListener("toggle", onToggle);
+  }, [onClose]);
 
   // Load / persist the draft in localStorage so a mis-close doesn't nuke
   // an in-progress lesson.
@@ -93,10 +126,6 @@ export default function AddLessonModal({
     } catch {
       /* ignore */
     }
-    // Give the browser a tick to render before focusing so the transform
-    // animation doesn't fight with the focus scroll.
-    const t = setTimeout(() => titleRef.current?.focus(), 30);
-    return () => clearTimeout(t);
   }, [open]);
 
   useEffect(() => {
@@ -109,46 +138,26 @@ export default function AddLessonModal({
     }
   }, [draft, open]);
 
-  const requestClose = useCallback(() => {
-    if (!isEmptyDraft(draft)) {
-      const ok = window.confirm(
-        "Discard this draft? The title, description, and taxonomy will be cleared.",
-      );
-      if (!ok) return;
-      try {
-        localStorage.removeItem(DRAFT_KEY);
-      } catch {
-        /* ignore */
-      }
-      setDraft(EMPTY_DRAFT);
-    }
-    onClose();
-  }, [draft, onClose]);
-
-  // Esc closes; Cmd/Ctrl+Enter submits from anywhere in the modal.
+  // Cmd/Ctrl+Enter submits from anywhere while the popover is open.
+  // Browser owns Esc + outside-click already.
   useEffect(() => {
     if (!open) return;
     function onKey(e: KeyboardEvent) {
-      if (e.key === "Escape") {
-        e.preventDefault();
-        requestClose();
-      } else if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+      if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
         e.preventDefault();
         formRef.current?.requestSubmit();
       }
     }
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-  }, [open, requestClose]);
+  }, [open]);
 
-  // When Grade is Calculus, force Subject to math.
+  // Grade=Calc forces Subject=Math.
   useEffect(() => {
     if (draft.grade === "13" && draft.subject && draft.subject !== "math") {
       setDraft((d) => ({ ...d, subject: "math", categoryId: "" }));
     }
   }, [draft.grade, draft.subject]);
-
-  if (!open || !mounted) return null;
 
   const gradeNum = draft.grade === "" ? null : Number(draft.grade);
   const subjectOptions =
@@ -168,187 +177,190 @@ export default function AddLessonModal({
   const canSubmit =
     draft.title.trim().length > 0 && draft.grade !== "" && draft.subject !== "";
 
-  return createPortal(
-    <>
-      <div
-        onClick={requestClose}
-        className="fixed inset-0 z-40 bg-black/60 backdrop-blur-sm"
-        aria-hidden="true"
-      />
-      <div
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby={headingId}
-        onClick={(e) => e.stopPropagation()}
-        className="fixed bottom-2 right-6 z-50 flex max-h-[26rem] w-[min(28rem,calc(100vw-3rem))] flex-col overflow-y-auto rounded-2xl bg-zinc-950 ring-1 ring-zinc-800 shadow-2xl"
+  return (
+    <div
+      ref={popoverRef}
+      popover="auto"
+      role="dialog"
+      aria-labelledby={headingId}
+      // Inline styles beat the popover UA styles (`[popover]:popover-open`
+      // sets `inset: 0` and `margin: auto` at higher specificity than
+      // Tailwind class selectors). Overriding here anchors us bottom-right.
+      style={{
+        margin: 0,
+        inset: "auto 1.5rem 0.5rem auto",
+        maxWidth: "min(28rem, calc(100vw - 3rem))",
+      }}
+      className="flex max-h-[26rem] w-full flex-col overflow-y-auto rounded-2xl border-0 bg-zinc-950 p-0 text-zinc-100 ring-1 ring-zinc-800 shadow-2xl backdrop:bg-black/60 backdrop:backdrop-blur-sm"
+    >
+      <form
+        ref={formRef}
+        action={formAction}
+        className="flex flex-col gap-3.5 p-5"
       >
-        <form
-          ref={formRef}
-          action={formAction}
-          className="flex flex-col gap-3.5 p-5"
-        >
-          <div className="flex items-center justify-between gap-3">
-            <p id={headingId} className="text-xs font-semibold uppercase tracking-[0.2em] text-cyan-300">
-              New lesson
-            </p>
+        <div className="flex items-center justify-between gap-3">
+          <p
+            id={headingId}
+            className="text-xs font-semibold uppercase tracking-[0.2em] text-cyan-300"
+          >
+            New lesson
+          </p>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close"
+            className="rounded-md p-1 text-zinc-500 transition hover:bg-zinc-900 hover:text-zinc-200"
+          >
+            <svg
+              viewBox="0 0 16 16"
+              className="h-4 w-4"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+            >
+              <line x1="4" y1="4" x2="12" y2="12" />
+              <line x1="12" y1="4" x2="4" y2="12" />
+            </svg>
+          </button>
+        </div>
+
+        <div>
+          <label htmlFor={titleId} className="sr-only">
+            Title
+          </label>
+          <input
+            ref={titleRef}
+            id={titleId}
+            name="title"
+            type="text"
+            required
+            maxLength={200}
+            placeholder="Lesson title"
+            value={draft.title}
+            onChange={(e) => setDraft((d) => ({ ...d, title: e.target.value }))}
+            autoComplete="off"
+            suppressHydrationWarning
+            className="w-full rounded-lg bg-zinc-900 px-3 py-2.5 text-lg font-medium text-zinc-50 placeholder:text-zinc-600 ring-1 ring-zinc-800 focus:outline-none focus:ring-2 focus:ring-cyan-400"
+          />
+        </div>
+
+        <div>
+          <label htmlFor={descId} className="sr-only">
+            Description
+          </label>
+          <input
+            id={descId}
+            name="description"
+            type="text"
+            maxLength={300}
+            placeholder="Short description — shown under the tile on the dashboard"
+            value={draft.description}
+            onChange={(e) =>
+              setDraft((d) => ({ ...d, description: e.target.value }))
+            }
+            autoComplete="off"
+            suppressHydrationWarning
+            className="w-full rounded-lg bg-zinc-900 px-3 py-2 text-sm text-zinc-100 placeholder:text-zinc-600 ring-1 ring-zinc-800 focus:outline-none focus:ring-2 focus:ring-cyan-400"
+          />
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2 border-t border-zinc-900 pt-4">
+          <ChipSelect
+            name="grade"
+            label="Grade"
+            value={draft.grade}
+            onChange={(v) =>
+              setDraft((d) => ({ ...d, grade: v, categoryId: "" }))
+            }
+            options={GRADE_OPTIONS}
+            placeholder="Pick grade"
+            required
+          />
+          <ChipSelect
+            name="subject"
+            label="Subject"
+            value={draft.subject}
+            onChange={(v) =>
+              setDraft((d) => ({
+                ...d,
+                subject: v as SubjectId | "",
+                categoryId: "",
+              }))
+            }
+            options={subjectOptions}
+            placeholder="Pick subject"
+            disabled={!canPickSubject}
+            disabledHint="Pick a grade first"
+            required
+          />
+          <ChipSelect
+            name="category_id"
+            label="Category"
+            value={draft.categoryId}
+            onChange={(v) => setDraft((d) => ({ ...d, categoryId: v }))}
+            options={[
+              { value: "", label: "Uncategorized" },
+              ...filteredCategories.map((c) => ({
+                value: String(c.id),
+                label: c.name,
+              })),
+            ]}
+            placeholder="Uncategorized"
+            disabled={!canPickCategory}
+            disabledHint="Pick a subject first"
+          />
+          {canPickCategory && filteredCategories.length === 0 && (
+            <a
+              href="/admin/categories"
+              target="_blank"
+              rel="noreferrer"
+              className="text-xs font-medium text-cyan-300 hover:text-cyan-200"
+            >
+              + Add category
+            </a>
+          )}
+        </div>
+
+        {state.error && (
+          <p role="alert" className="text-sm text-rose-400">
+            {state.error}
+          </p>
+        )}
+
+        <div className="flex items-center justify-between gap-3 border-t border-zinc-900 pt-4">
+          <p className="text-[11px] text-zinc-600">
+            <kbd className="rounded bg-zinc-900 px-1 py-0.5 font-sans text-zinc-400 ring-1 ring-zinc-800">
+              Esc
+            </kbd>{" "}
+            to cancel
+          </p>
+          <div className="flex items-center gap-2">
             <button
               type="button"
-              onClick={requestClose}
-              aria-label="Close"
-              className="rounded-md p-1 text-zinc-500 transition hover:bg-zinc-900 hover:text-zinc-200"
+              onClick={onClose}
+              disabled={pending}
+              className="rounded-lg px-3 py-2 text-sm font-medium text-zinc-400 hover:bg-zinc-900 hover:text-zinc-100 disabled:opacity-60"
             >
-              <svg
-                viewBox="0 0 16 16"
-                className="h-4 w-4"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={!canSubmit || pending}
+              className="inline-flex items-center gap-2 rounded-lg bg-cyan-500 px-4 py-2 text-sm font-bold text-black transition hover:bg-cyan-400 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              {pending ? "Creating…" : "Create lesson"}
+              <span
+                aria-hidden
+                className="hidden rounded bg-black/20 px-1.5 py-0.5 text-[10px] font-sans font-medium text-black/70 sm:inline"
               >
-                <line x1="4" y1="4" x2="12" y2="12" />
-                <line x1="12" y1="4" x2="4" y2="12" />
-              </svg>
+                ⌘↵
+              </span>
             </button>
           </div>
-
-          <div>
-            <label htmlFor={titleId} className="sr-only">
-              Title
-            </label>
-            <input
-              ref={titleRef}
-              id={titleId}
-              name="title"
-              type="text"
-              required
-              maxLength={200}
-              placeholder="Lesson title"
-              value={draft.title}
-              onChange={(e) => setDraft((d) => ({ ...d, title: e.target.value }))}
-              autoComplete="off"
-              suppressHydrationWarning
-              className="w-full rounded-lg bg-zinc-900 px-3 py-2.5 text-lg font-medium text-zinc-50 placeholder:text-zinc-600 ring-1 ring-zinc-800 focus:outline-none focus:ring-2 focus:ring-cyan-400"
-            />
-          </div>
-
-          <div>
-            <label htmlFor={descId} className="sr-only">
-              Description
-            </label>
-            <input
-              id={descId}
-              name="description"
-              type="text"
-              maxLength={300}
-              placeholder="Short description — shown under the tile on the dashboard"
-              value={draft.description}
-              onChange={(e) =>
-                setDraft((d) => ({ ...d, description: e.target.value }))
-              }
-              autoComplete="off"
-              suppressHydrationWarning
-              className="w-full rounded-lg bg-zinc-900 px-3 py-2 text-sm text-zinc-100 placeholder:text-zinc-600 ring-1 ring-zinc-800 focus:outline-none focus:ring-2 focus:ring-cyan-400"
-            />
-          </div>
-
-          <div className="flex flex-wrap items-center gap-2 border-t border-zinc-900 pt-4">
-            <ChipSelect
-              name="grade"
-              label="Grade"
-              value={draft.grade}
-              onChange={(v) =>
-                setDraft((d) => ({ ...d, grade: v, categoryId: "" }))
-              }
-              options={GRADE_OPTIONS}
-              placeholder="Pick grade"
-              required
-            />
-            <ChipSelect
-              name="subject"
-              label="Subject"
-              value={draft.subject}
-              onChange={(v) =>
-                setDraft((d) => ({
-                  ...d,
-                  subject: v as SubjectId | "",
-                  categoryId: "",
-                }))
-              }
-              options={subjectOptions}
-              placeholder="Pick subject"
-              disabled={!canPickSubject}
-              disabledHint="Pick a grade first"
-              required
-            />
-            <ChipSelect
-              name="category_id"
-              label="Category"
-              value={draft.categoryId}
-              onChange={(v) => setDraft((d) => ({ ...d, categoryId: v }))}
-              options={[
-                { value: "", label: "Uncategorized" },
-                ...filteredCategories.map((c) => ({
-                  value: String(c.id),
-                  label: c.name,
-                })),
-              ]}
-              placeholder="Uncategorized"
-              disabled={!canPickCategory}
-              disabledHint="Pick a subject first"
-            />
-            {canPickCategory && filteredCategories.length === 0 && (
-              <a
-                href="/admin/categories"
-                target="_blank"
-                rel="noreferrer"
-                className="text-xs font-medium text-cyan-300 hover:text-cyan-200"
-              >
-                + Add category
-              </a>
-            )}
-          </div>
-
-          {state.error && (
-            <p role="alert" className="text-sm text-rose-400">
-              {state.error}
-            </p>
-          )}
-
-          <div className="flex items-center justify-between gap-3 border-t border-zinc-900 pt-4">
-            <p className="text-[11px] text-zinc-600">
-              <kbd className="rounded bg-zinc-900 px-1 py-0.5 font-sans text-zinc-400 ring-1 ring-zinc-800">
-                Esc
-              </kbd>{" "}
-              to cancel
-            </p>
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={requestClose}
-                disabled={pending}
-                className="rounded-lg px-3 py-2 text-sm font-medium text-zinc-400 hover:bg-zinc-900 hover:text-zinc-100 disabled:opacity-60"
-              >
-                Cancel
-              </button>
-              <button
-                type="submit"
-                disabled={!canSubmit || pending}
-                className="inline-flex items-center gap-2 rounded-lg bg-cyan-500 px-4 py-2 text-sm font-bold text-black transition hover:bg-cyan-400 disabled:cursor-not-allowed disabled:opacity-40"
-              >
-                {pending ? "Creating…" : "Create lesson"}
-                <span
-                  aria-hidden
-                  className="hidden rounded bg-black/20 px-1.5 py-0.5 text-[10px] font-sans font-medium text-black/70 sm:inline"
-                >
-                  ⌘↵
-                </span>
-              </button>
-            </div>
-          </div>
-        </form>
-      </div>
-    </>,
-    document.body,
+        </div>
+      </form>
+    </div>
   );
 }
 
