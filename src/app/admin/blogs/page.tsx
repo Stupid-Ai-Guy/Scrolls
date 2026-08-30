@@ -1,15 +1,8 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { getSession } from "@/lib/session";
-import {
-  createBlogAction,
-  deleteBlogAction,
-  logoutAction,
-} from "@/lib/actions";
+import { createBlogAction, deleteBlogAction } from "@/lib/actions";
 import { dbAll } from "@/lib/db";
-import { getTheme } from "@/lib/theme";
-import ThemeToggle from "@/components/theme-toggle";
-import ResetCompletionsButton from "../reset-completions-button";
 import DeleteBlogButton from "./delete-blog-button";
 
 type BlogSummary = {
@@ -39,7 +32,6 @@ export default async function AdminBlogsPage() {
   const session = await getSession();
   if (!session) redirect("/login");
   if (session.role !== "admin") redirect("/dashboard");
-  const theme = await getTheme();
 
   const posts = await dbAll<BlogSummary>(
     "SELECT b.id, b.title, b.body, b.published, b.updated_at, u.email AS author_email FROM blogs b JOIN users u ON b.author_id = u.id ORDER BY b.updated_at DESC",
@@ -49,52 +41,21 @@ export default async function AdminBlogsPage() {
     <div className="min-h-screen bg-black">
       <header className="sticky top-0 z-10 border-b border-zinc-900 bg-black/80 backdrop-blur">
         <div className="mx-auto flex max-w-5xl items-center justify-between px-6 py-3">
-          <Link href="/admin" className="flex items-center gap-2">
+          <Link href="/dashboard" className="flex items-center gap-2">
             <span className="inline-block h-6 w-6 rounded-md bg-cyan-400 shadow-[0_0_20px_-2px_rgba(34,211,238,0.7)]" />
             <span className="text-base font-semibold tracking-tight text-zinc-100">
               Scrolls
             </span>
             <span className="ml-2 rounded-full bg-cyan-500/10 px-2 py-0.5 text-xs font-medium text-cyan-300 ring-1 ring-cyan-500/30">
-              Studio
+              Blogs
             </span>
           </Link>
-          <div className="flex items-center gap-2">
-            <Link
-              href="/admin/categories"
-              className="rounded-lg px-3 py-1.5 text-sm font-medium text-zinc-300 hover:bg-zinc-900 hover:text-zinc-100"
-            >
-              Categories
-            </Link>
-            <Link
-              href="/admin/blogs"
-              className="rounded-lg bg-zinc-900 px-3 py-1.5 text-sm font-medium text-zinc-100 ring-1 ring-zinc-800"
-              aria-current="page"
-            >
-              Blogs
-            </Link>
-            <Link
-              href="/admin/terminal"
-              className="rounded-lg px-3 py-1.5 text-sm font-medium text-zinc-300 hover:bg-zinc-900 hover:text-zinc-100"
-            >
-              Terminal
-            </Link>
-            <ResetCompletionsButton />
-            <ThemeToggle theme={theme} />
-            <Link
-              href="/dashboard"
-              className="rounded-lg px-3 py-1.5 text-sm font-medium text-zinc-300 hover:bg-zinc-900 hover:text-zinc-100"
-            >
-              Learner view
-            </Link>
-            <form action={logoutAction}>
-              <button
-                type="submit"
-                className="rounded-lg bg-zinc-900 px-3 py-1.5 text-sm font-medium text-zinc-300 ring-1 ring-zinc-800 hover:bg-zinc-800"
-              >
-                Sign out
-              </button>
-            </form>
-          </div>
+          <Link
+            href="/dashboard"
+            className="rounded-lg px-3 py-1.5 text-sm font-medium text-zinc-400 hover:bg-zinc-900 hover:text-zinc-100"
+          >
+            ← Dashboard
+          </Link>
         </div>
       </header>
 

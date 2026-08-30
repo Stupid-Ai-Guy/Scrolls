@@ -57,20 +57,20 @@ export default async function CategoriesPage({
     <div className="min-h-screen bg-black">
       <header className="sticky top-0 z-10 border-b border-zinc-900 bg-black/80 backdrop-blur">
         <div className="mx-auto flex max-w-4xl items-center justify-between px-6 py-3">
-          <Link href="/admin" className="flex items-center gap-2">
+          <Link href="/dashboard" className="flex items-center gap-2">
             <span className="inline-block h-6 w-6 rounded-md bg-cyan-400 shadow-[0_0_20px_-2px_rgba(34,211,238,0.7)]" />
             <span className="text-base font-semibold tracking-tight text-zinc-100">
               Scrolls
             </span>
             <span className="ml-2 rounded-full bg-cyan-500/10 px-2 py-0.5 text-xs font-medium text-cyan-300 ring-1 ring-cyan-500/30">
-              Studio
+              Categories
             </span>
           </Link>
           <Link
-            href="/admin"
+            href="/dashboard"
             className="rounded-lg px-3 py-1.5 text-sm font-medium text-zinc-400 hover:bg-zinc-900 hover:text-zinc-100"
           >
-            ← Studio
+            ← Dashboard
           </Link>
         </div>
       </header>

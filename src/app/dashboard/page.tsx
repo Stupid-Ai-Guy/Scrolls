@@ -19,6 +19,9 @@ import {
 import { getTheme } from "@/lib/theme";
 import ThemeToggle from "@/components/theme-toggle";
 import CountUp from "@/components/count-up";
+import AddLessonButton from "@/components/add-lesson-button";
+import AdminMenu from "@/components/admin-menu";
+import TileAdminActions from "@/components/tile-admin-actions";
 
 type LessonCard = Pick<
   LessonRow,
@@ -151,6 +154,20 @@ export default async function DashboardPage({
   const theme = await getTheme();
   const resume = pickResume(lessons, progressByLesson);
 
+  // Admins need every category (across subjects/grades) so the create-lesson
+  // modal can filter as they pick the taxonomy. Skipped for learners.
+  const allCategoriesForAdmin = isAdmin
+    ? await dbAll<CategoryRow>(
+        "SELECT id, subject, grade, name, position, created_at FROM categories ORDER BY subject, grade, position",
+      )
+    : [];
+  const adminCategoryOptions = allCategoriesForAdmin.map((c) => ({
+    id: c.id,
+    subject: c.subject,
+    grade: c.grade,
+    name: c.name,
+  }));
+
   return (
     <div className="min-h-screen bg-black">
       <header className="sticky top-0 z-20 border-b border-zinc-900 bg-black/80 backdrop-blur">
@@ -191,12 +208,10 @@ export default async function DashboardPage({
 
           <div className="flex items-center gap-2">
             {isAdmin && (
-              <Link
-                href="/admin"
-                className="hidden rounded-lg bg-cyan-500 px-3 py-1.5 text-xs font-semibold text-black transition hover:bg-cyan-400 sm:inline-block"
-              >
-                Manage lessons
-              </Link>
+              <>
+                <AddLessonButton categories={adminCategoryOptions} />
+                <AdminMenu />
+              </>
             )}
             <ThemeToggle theme={theme} />
             <form action={logoutAction}>
@@ -264,36 +279,15 @@ export default async function DashboardPage({
         />
 
         <section className="mt-10">
-          <div className="flex flex-wrap items-baseline justify-between gap-3">
-            <div>
-              <p
-                className={`text-xs font-semibold uppercase tracking-[0.2em] ${subject.accentText}`}
-              >
-                {subject.label}
-              </p>
-              <h1 className="mt-1.5 text-2xl font-semibold tracking-tight text-zinc-50 sm:text-3xl">
-                {gradeLongLabel(grade)}
-              </h1>
-            </div>
-            {isAdmin && lessons.length > 0 && (
-              <Link
-                href={`/admin/new?subject=${subject.id}&grade=${gradeParam(grade)}`}
-                className="inline-flex items-center gap-1.5 rounded-lg bg-cyan-500/15 px-3 py-1.5 text-xs font-semibold text-cyan-300 ring-1 ring-cyan-500/40 transition hover:bg-cyan-500/25 hover:text-cyan-200 hover:ring-cyan-400/60"
-              >
-                <svg
-                  viewBox="0 0 16 16"
-                  className="h-3.5 w-3.5"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2.5"
-                  strokeLinecap="round"
-                >
-                  <line x1="8" y1="3" x2="8" y2="13" />
-                  <line x1="3" y1="8" x2="13" y2="8" />
-                </svg>
-                New lesson
-              </Link>
-            )}
+          <div>
+            <p
+              className={`text-xs font-semibold uppercase tracking-[0.2em] ${subject.accentText}`}
+            >
+              {subject.label}
+            </p>
+            <h1 className="mt-1.5 text-2xl font-semibold tracking-tight text-zinc-50 sm:text-3xl">
+              {gradeLongLabel(grade)}
+            </h1>
           </div>
 
           <div className="mt-5 flex flex-wrap items-center gap-1.5">
@@ -330,12 +324,14 @@ export default async function DashboardPage({
               isAdmin={isAdmin}
               subjectLabel={subject.label}
               gradeLabel={gradeLongLabel(grade)}
+              adminCategoryOptions={adminCategoryOptions}
             />
           ) : (
             <CategoryGrid
               groups={groups}
               pillClass={subject.pill}
               progressByLesson={progressByLesson}
+              isAdmin={isAdmin}
             />
           )}
         </section>
@@ -581,10 +577,17 @@ function EmptyState({
   isAdmin,
   subjectLabel,
   gradeLabel,
+  adminCategoryOptions,
 }: {
   isAdmin: boolean;
   subjectLabel: string;
   gradeLabel: string;
+  adminCategoryOptions: {
+    id: number;
+    subject: string;
+    grade: number;
+    name: string;
+  }[];
 }) {
   return (
     <div className="rounded-3xl bg-zinc-950 p-12 text-center ring-1 ring-zinc-800">
@@ -611,12 +614,12 @@ function EmptyState({
         This curriculum will populate as soon as lessons are added.
       </p>
       {isAdmin && (
-        <Link
-          href="/admin"
-          className="mt-6 inline-flex items-center justify-center rounded-lg bg-cyan-500 px-4 py-2 text-sm font-semibold text-black transition hover:bg-cyan-400"
-        >
-          Add a lesson
-        </Link>
+        <div className="mt-6 flex justify-center">
+          <AddLessonButton
+            categories={adminCategoryOptions}
+            variant="hero"
+          />
+        </div>
       )}
     </div>
   );
@@ -667,10 +670,12 @@ function CategoryGrid({
   groups,
   pillClass,
   progressByLesson,
+  isAdmin,
 }: {
   groups: LessonGroup[];
   pillClass: string;
   progressByLesson: Map<number, LessonProgress>;
+  isAdmin: boolean;
 }) {
   if (groups.length === 0) return null;
   return (
@@ -698,6 +703,7 @@ function CategoryGrid({
                   letter={group.letter}
                   pillClass={pillClass}
                   progress={progressByLesson.get(l.id)}
+                  isAdmin={isAdmin}
                 />
               </li>
             ))}
@@ -714,20 +720,24 @@ function SkillTile({
   letter,
   pillClass,
   progress,
+  isAdmin,
 }: {
   lesson: LessonCard;
   index: number;
   letter: string;
   pillClass: string;
   progress: LessonProgress | undefined;
+  isAdmin: boolean;
 }) {
   const masteryPct = progress ? Math.round(progress.mastery * 100) : 0;
   const reviewDue = progress?.reviewDueNow ?? false;
   const mastered = (progress?.mastery ?? 0) >= 1;
 
+  // Tile is a positioned div, not a Link, so admin actions can overlay it
+  // without nesting <a>. The Link fills the tile invisibly beneath the
+  // content; content is pointer-events-none so clicks pass through.
   return (
-    <Link
-      href={`/lessons/${lesson.id}`}
+    <div
       className={
         "group relative flex h-full flex-col gap-3 rounded-2xl p-5 ring-1 transition " +
         (reviewDue
@@ -735,7 +745,12 @@ function SkillTile({
           : "bg-zinc-950 ring-zinc-800 hover:-translate-y-0.5 hover:bg-zinc-900 hover:ring-cyan-400/60")
       }
     >
-      <div className="flex items-start justify-between gap-3">
+      <Link
+        href={`/lessons/${lesson.id}`}
+        aria-label={lesson.title || "Open lesson"}
+        className="absolute inset-0 rounded-2xl focus-visible:outline focus-visible:outline-2 focus-visible:outline-cyan-400"
+      />
+      <div className="pointer-events-none relative flex items-start justify-between gap-3">
         <span
           className={`inline-flex h-8 min-w-8 items-center justify-center rounded-lg px-2 text-xs font-bold ${pillClass}`}
         >
@@ -743,7 +758,7 @@ function SkillTile({
         </span>
         <ProgressRing pct={masteryPct} mastered={mastered} />
       </div>
-      <div className="min-w-0 flex-1">
+      <div className="pointer-events-none relative min-w-0 flex-1">
         <p className="text-sm font-semibold text-zinc-100">{lesson.title}</p>
         {lesson.description && (
           <p className="mt-1 line-clamp-2 text-xs text-zinc-500">
@@ -752,7 +767,7 @@ function SkillTile({
         )}
       </div>
       {reviewDue && (
-        <span className="inline-flex w-fit items-center gap-1 rounded-full bg-cyan-500/15 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-cyan-300 ring-1 ring-cyan-500/40">
+        <span className="pointer-events-none relative inline-flex w-fit items-center gap-1 rounded-full bg-cyan-500/15 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-cyan-300 ring-1 ring-cyan-500/40">
           <svg
             viewBox="0 0 16 16"
             className="h-2.5 w-2.5"
@@ -770,7 +785,8 @@ function SkillTile({
           Review ready
         </span>
       )}
-    </Link>
+      {isAdmin && <TileAdminActions lessonId={lesson.id} />}
+    </div>
   );
 }
 
