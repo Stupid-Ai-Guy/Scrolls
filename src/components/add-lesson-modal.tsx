@@ -174,12 +174,12 @@ export default function AddLessonModal({
     >
       <div
         onClick={(e) => e.stopPropagation()}
-        className="fixed inset-y-0 right-0 flex w-full max-w-md flex-col overflow-y-auto border-l border-zinc-800 bg-zinc-950 shadow-2xl"
+        className="fixed right-6 top-1/2 flex max-h-[85vh] w-[min(28rem,calc(100vw-3rem))] -translate-y-1/2 flex-col overflow-y-auto rounded-2xl bg-zinc-950 ring-1 ring-zinc-800 shadow-2xl"
       >
         <form
           ref={formRef}
           action={formAction}
-          className="flex min-h-full flex-col gap-5 p-6"
+          className="flex flex-col gap-5 p-6"
         >
           <div className="flex items-start justify-between gap-4">
             <div>
