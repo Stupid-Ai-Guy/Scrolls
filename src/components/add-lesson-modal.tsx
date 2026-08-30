@@ -6,6 +6,8 @@ import {
   useId,
   useRef,
   useState,
+  type ForwardedRef,
+  forwardRef,
 } from "react";
 import { createLessonAction, type FormState } from "@/lib/actions";
 
@@ -56,15 +58,21 @@ const SUBJECT_OPTIONS: { value: SubjectId; label: string }[] = [
 const chipBase =
   "relative inline-flex items-center gap-1.5 rounded-full bg-zinc-900 py-1.5 pl-3 pr-2.5 text-xs font-semibold ring-1 ring-zinc-800 transition focus-within:ring-2 focus-within:ring-cyan-400";
 
-export default function AddLessonModal({
-  open,
-  onClose,
-  categories,
-}: {
-  open: boolean;
-  onClose: () => void;
-  categories: CategoryOption[];
-}) {
+// Renders the popover element itself. Purely declarative: the caller
+// supplies an id and puts `popovertarget={id}` on their trigger button;
+// the browser handles show/hide entirely. React only observes the toggle
+// event to load the draft + focus the title when the popover opens, and
+// to run a Cmd+Enter submit shortcut while it's open.
+function AddLessonModalInner(
+  {
+    id,
+    categories,
+  }: {
+    id: string;
+    categories: CategoryOption[];
+  },
+  forwardedRef: ForwardedRef<HTMLDivElement>,
+) {
   const headingId = useId();
   const titleId = useId();
   const descId = useId();
@@ -73,84 +81,71 @@ export default function AddLessonModal({
     createLessonAction,
     initial,
   );
-  const popoverRef = useRef<HTMLDivElement>(null);
+  const localRef = useRef<HTMLDivElement>(null);
   const titleRef = useRef<HTMLInputElement>(null);
   const formRef = useRef<HTMLFormElement>(null);
 
-  // Sync the parent's `open` prop to the native popover API. Browser puts
-  // the element in the top layer — no z-index, no portal, no containing
-  // block gotchas from ancestor backdrop-filter / transform.
-  useEffect(() => {
-    const el = popoverRef.current;
-    if (!el) return;
-    if (open) {
-      try {
-        el.showPopover();
-      } catch {
-        /* already open or unsupported */
-      }
-      const t = setTimeout(() => titleRef.current?.focus(), 30);
-      return () => clearTimeout(t);
-    }
-    try {
-      el.hidePopover();
-    } catch {
-      /* already closed */
-    }
-  }, [open]);
+  // Bridge internal ref and forwarded ref so the parent (AddLessonButton)
+  // can call togglePopover() on the same element we listen to.
+  function setRefs(node: HTMLDivElement | null) {
+    localRef.current = node;
+    if (typeof forwardedRef === "function") forwardedRef(node);
+    else if (forwardedRef) forwardedRef.current = node;
+  }
 
-  // Sync browser-initiated close (Esc key, click outside, another auto
-  // popover opening) back to parent state. Guard against firing while the
-  // parent already thinks we're closed.
+  // On open: load any persisted draft and focus the title. Uses the
+  // browser's toggle event so it stays in sync however the popover was
+  // opened (button click, N shortcut, subsequent auto popover, etc).
   useEffect(() => {
-    const el = popoverRef.current;
+    const el = localRef.current;
     if (!el) return;
     function onToggle(e: Event) {
       const newState = (e as unknown as { newState: string }).newState;
-      if (newState === "closed") onClose();
+      if (newState !== "open") return;
+      try {
+        const raw = localStorage.getItem(DRAFT_KEY);
+        if (raw) {
+          const parsed = JSON.parse(raw) as Partial<Draft>;
+          setDraft({ ...EMPTY_DRAFT, ...parsed });
+        }
+      } catch {
+        /* ignore */
+      }
+      // setTimeout so the browser finishes its top-layer promotion before
+      // we move focus.
+      setTimeout(() => titleRef.current?.focus(), 30);
     }
     el.addEventListener("toggle", onToggle);
     return () => el.removeEventListener("toggle", onToggle);
-  }, [onClose]);
+  }, []);
 
-  // Load / persist the draft in localStorage so a mis-close doesn't nuke
-  // an in-progress lesson.
+  // Persist draft on every change. Only writes when the popover is
+  // currently open (checked via :popover-open) to avoid clobbering the
+  // stored draft during initial mount.
   useEffect(() => {
-    if (!open) return;
-    try {
-      const raw = localStorage.getItem(DRAFT_KEY);
-      if (raw) {
-        const parsed = JSON.parse(raw) as Partial<Draft>;
-        setDraft({ ...EMPTY_DRAFT, ...parsed });
-      }
-    } catch {
-      /* ignore */
-    }
-  }, [open]);
-
-  useEffect(() => {
-    if (!open) return;
+    const el = localRef.current;
+    if (!el || !el.matches(":popover-open")) return;
     try {
       if (isEmptyDraft(draft)) localStorage.removeItem(DRAFT_KEY);
       else localStorage.setItem(DRAFT_KEY, JSON.stringify(draft));
     } catch {
       /* ignore */
     }
-  }, [draft, open]);
+  }, [draft]);
 
-  // Cmd/Ctrl+Enter submits from anywhere while the popover is open.
-  // Browser owns Esc + outside-click already.
+  // Cmd/Ctrl+Enter submits, but only while the popover is open. Browser
+  // owns Esc + outside-click via popover="auto".
   useEffect(() => {
-    if (!open) return;
     function onKey(e: KeyboardEvent) {
-      if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
-        e.preventDefault();
-        formRef.current?.requestSubmit();
-      }
+      if (!((e.metaKey || e.ctrlKey) && e.key === "Enter")) return;
+      const el = localRef.current;
+      if (!el || !el.matches(":popover-open")) return;
+      e.preventDefault();
+      formRef.current?.requestSubmit();
     }
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-  }, [open]);
+  }, []);
 
   // Grade=Calc forces Subject=Math.
   useEffect(() => {
@@ -179,24 +174,24 @@ export default function AddLessonModal({
 
   return (
     <div
-      ref={popoverRef}
+      ref={setRefs}
+      id={id}
       popover="auto"
       role="dialog"
       aria-labelledby={headingId}
-      // Inline styles beat the popover UA styles (`[popover]:popover-open`
-      // sets `inset: 0` and `margin: auto` at higher specificity than
-      // Tailwind class selectors). Overriding here anchors us bottom-right.
+      // Inline styles override the popover UA `inset: 0; margin: auto`
+      // which would otherwise center the popover.
       style={{
         margin: 0,
         inset: "auto 1.5rem 0.5rem auto",
         maxWidth: "min(28rem, calc(100vw - 3rem))",
       }}
-      className="flex max-h-[26rem] w-full flex-col overflow-y-auto rounded-2xl border-0 bg-zinc-950 p-0 text-zinc-100 ring-1 ring-zinc-800 shadow-2xl backdrop:bg-black/60 backdrop:backdrop-blur-sm"
+      className="flex-col overflow-y-auto rounded-2xl border-0 bg-zinc-950 p-0 text-zinc-100 ring-1 ring-zinc-800 shadow-2xl backdrop:bg-black/60 backdrop:backdrop-blur-sm open:flex"
     >
       <form
         ref={formRef}
         action={formAction}
-        className="flex flex-col gap-3.5 p-5"
+        className="flex max-h-[26rem] w-[28rem] max-w-full flex-col gap-3.5 p-5"
       >
         <div className="flex items-center justify-between gap-3">
           <p
@@ -207,7 +202,8 @@ export default function AddLessonModal({
           </p>
           <button
             type="button"
-            onClick={onClose}
+            popoverTarget={id}
+            popoverTargetAction="hide"
             aria-label="Close"
             className="rounded-md p-1 text-zinc-500 transition hover:bg-zinc-900 hover:text-zinc-200"
           >
@@ -338,7 +334,8 @@ export default function AddLessonModal({
           <div className="flex items-center gap-2">
             <button
               type="button"
-              onClick={onClose}
+              popoverTarget={id}
+              popoverTargetAction="hide"
               disabled={pending}
               className="rounded-lg px-3 py-2 text-sm font-medium text-zinc-400 hover:bg-zinc-900 hover:text-zinc-100 disabled:opacity-60"
             >
@@ -363,6 +360,10 @@ export default function AddLessonModal({
     </div>
   );
 }
+
+const AddLessonModal = forwardRef(AddLessonModalInner);
+AddLessonModal.displayName = "AddLessonModal";
+export default AddLessonModal;
 
 function ChipSelect({
   name,

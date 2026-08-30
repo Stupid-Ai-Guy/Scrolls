@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useId, useRef } from "react";
 import AddLessonModal from "./add-lesson-modal";
 
 type CategoryOption = {
@@ -10,8 +10,11 @@ type CategoryOption = {
   name: string;
 };
 
-// Renders the header pill and owns the modal open state. Also wires the
-// global `N` shortcut (skipped when the user is typing in a field).
+// Renders the trigger pill AND the popover. Uses `popovertarget` on the
+// button so the browser handles show/hide/toggle entirely — no React
+// state to sync, no race conditions between click events and hidePopover.
+// The N global hotkey still needs JS since it's a keyboard shortcut, not
+// a click on a trigger.
 export default function AddLessonButton({
   categories,
   variant = "pill",
@@ -19,7 +22,8 @@ export default function AddLessonButton({
   categories: CategoryOption[];
   variant?: "pill" | "hero";
 }) {
-  const [open, setOpen] = useState(false);
+  const popoverId = useId();
+  const popoverRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
@@ -36,7 +40,11 @@ export default function AddLessonButton({
         return;
       }
       e.preventDefault();
-      setOpen(true);
+      try {
+        popoverRef.current?.togglePopover();
+      } catch {
+        /* older browsers or popover not attached yet */
+      }
     }
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
@@ -47,7 +55,7 @@ export default function AddLessonButton({
       {variant === "hero" ? (
         <button
           type="button"
-          onClick={() => setOpen(true)}
+          popoverTarget={popoverId}
           className="inline-flex items-center justify-center gap-2 rounded-lg bg-cyan-500 px-4 py-2 text-sm font-semibold text-black transition hover:bg-cyan-400"
         >
           <PlusIcon />
@@ -56,7 +64,7 @@ export default function AddLessonButton({
       ) : (
         <button
           type="button"
-          onClick={() => setOpen(true)}
+          popoverTarget={popoverId}
           title="Add lesson (N)"
           className="inline-flex items-center gap-1.5 rounded-lg bg-cyan-500 px-3 py-1.5 text-xs font-semibold text-black transition hover:bg-cyan-400"
         >
@@ -65,8 +73,8 @@ export default function AddLessonButton({
         </button>
       )}
       <AddLessonModal
-        open={open}
-        onClose={() => setOpen(false)}
+        ref={popoverRef}
+        id={popoverId}
         categories={categories}
       />
     </>
