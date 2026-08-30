@@ -174,7 +174,7 @@ export default function AddLessonModal({
     >
       <div
         onClick={(e) => e.stopPropagation()}
-        className="fixed right-6 top-1/2 flex max-h-[85vh] w-[min(28rem,calc(100vw-3rem))] -translate-y-1/2 flex-col overflow-y-auto rounded-2xl bg-zinc-950 ring-1 ring-zinc-800 shadow-2xl"
+        className="fixed bottom-6 right-6 flex max-h-[85vh] w-[min(28rem,calc(100vw-3rem))] flex-col overflow-y-auto rounded-2xl bg-zinc-950 ring-1 ring-zinc-800 shadow-2xl"
       >
         <form
           ref={formRef}
